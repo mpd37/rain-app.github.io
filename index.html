@@ -52,8 +52,14 @@
     <div class="weather-card bg-white rounded-xl p-8 max-w-md w-full">
         <div class="text-center">
             <h1 class="text-2xl font-bold text-gray-800">Rain Warning</h1>
-            <p class="text-gray-500 mb-6">Cleveland Heights, Ohio</p>
+            <p id="location-display" class="text-gray-500 mb-4">Loading location...</p>
         </div>
+
+        <!-- Location Search Form -->
+        <form id="location-form" class="flex gap-2 mb-6">
+            <input type="text" id="location-input" placeholder="Enter a city..." class="flex-grow p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Search</button>
+        </form>
 
         <div id="weather-info" class="text-center">
             <div class="loader"></div>
@@ -63,7 +69,7 @@
         <div id="warning-message" class="mt-6 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
         
         <div class="text-center mt-4 space-y-2">
-             <button id="install-button" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+             <button id="install-button" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                 Install App
             </button>
             <p class="text-xs text-gray-500">Notification Status: <span id="notification-status" class="font-semibold">Pending</span></p>
@@ -86,31 +92,22 @@
         const installButton = document.getElementById('install-button');
 
         window.addEventListener('beforeinstallprompt', (e) => {
-            // Prevent the mini-infobar from appearing on mobile
             e.preventDefault();
-            // Stash the event so it can be triggered later.
             deferredPrompt = e;
-            // Update UI to show the install button
             installButton.style.display = 'block';
         });
 
         installButton.addEventListener('click', async () => {
             if (deferredPrompt) {
-                // Show the install prompt
                 deferredPrompt.prompt();
-                // Wait for the user to respond to the prompt
                 const { outcome } = await deferredPrompt.userChoice;
                 console.log(`User response to the install prompt: ${outcome}`);
-                // We've used the prompt, and can't use it again, throw it away
                 deferredPrompt = null;
-                // Hide the install button
                 installButton.style.display = 'none';
             }
         });
 
         // --- Configuration ---
-        const LATITUDE = 41.50;
-        const LONGITUDE = -81.56;
         const RAIN_PROBABILITY_THRESHOLD = 25;
         const FORECAST_HOURS = 12;
         const REFRESH_INTERVAL = 1200000; // 20 minutes
@@ -120,6 +117,13 @@
         const warningMessageDiv = document.getElementById('warning-message');
         const lastUpdatedSpan = document.getElementById('last-updated');
         const notificationStatusSpan = document.getElementById('notification-status');
+        const locationForm = document.getElementById('location-form');
+        const locationInput = document.getElementById('location-input');
+        const locationDisplay = document.getElementById('location-display');
+
+        // --- App Logic ---
+        let currentLatitude, currentLongitude;
+        let weatherInterval;
 
         function requestNotificationPermission() {
             if (!("Notification" in window)) {
@@ -128,32 +132,65 @@
                 return;
             }
             Notification.requestPermission().then(permission => {
-                if (permission === "granted") {
-                    notificationStatusSpan.textContent = "Enabled";
-                    notificationStatusSpan.className = "font-semibold text-green-600";
-                } else {
-                    notificationStatusSpan.textContent = "Disabled";
-                    notificationStatusSpan.className = "font-semibold text-red-600";
-                }
+                notificationStatusSpan.textContent = permission === "granted" ? "Enabled" : "Disabled";
+                notificationStatusSpan.className = permission === "granted" ? "font-semibold text-green-600" : "font-semibold text-red-600";
             });
         }
         
         function sendNotification(title, body) {
             if (Notification.permission === "granted") {
-                // Use the service worker to show the notification
                 navigator.serviceWorker.ready.then(registration => {
-                    registration.showNotification(title, {
-                        body: body,
-                        icon: 'icon-192.png' // Using an icon from manifest
-                    });
+                    registration.showNotification(title, { body: body, icon: 'icon-192.png' });
                 });
             }
         }
 
+        async function getCoordinatesForLocation(locationName) {
+            weatherInfoDiv.innerHTML = '<div class="loader"></div><p class="text-gray-600">Finding location...</p>';
+            const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
+            
+            try {
+                const response = await fetch(geocodeUrl);
+                if (!response.ok) throw new Error('Geocoding API failed.');
+                const data = await response.json();
+
+                if (data.results && data.results.length > 0) {
+                    const location = data.results[0];
+                    const displayName = `${location.name}, ${location.admin1 || location.country}`;
+                    updateLocation(location.latitude, location.longitude, displayName);
+                    // Save to local storage
+                    localStorage.setItem('weatherLocation', JSON.stringify({
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        name: displayName
+                    }));
+                } else {
+                    alert('Location not found. Please try again.');
+                    loadSavedLocation(); // Revert to last known location
+                }
+            } catch (error) {
+                console.error("Error fetching coordinates:", error);
+                alert('Failed to find location.');
+                loadSavedLocation(); // Revert to last known location
+            }
+        }
+
+        function updateLocation(lat, lon, name) {
+            currentLatitude = lat;
+            currentLongitude = lon;
+            locationDisplay.textContent = name;
+            
+            if (weatherInterval) clearInterval(weatherInterval);
+            getWeatherData();
+            weatherInterval = setInterval(getWeatherData, REFRESH_INTERVAL);
+        }
+
         async function getWeatherData() {
+            if (!currentLatitude || !currentLongitude) return;
+
             weatherInfoDiv.innerHTML = '<div class="loader"></div><p class="text-gray-600">Fetching latest weather data...</p>';
             warningMessageDiv.style.display = 'none';
-            const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${LATITUDE}&longitude=${LONGITUDE}&hourly=precipitation_probability&forecast_days=1`;
+            const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLatitude}&longitude=${currentLongitude}&hourly=precipitation_probability&forecast_days=1`;
 
             try {
                 const response = await fetch(apiUrl);
@@ -163,7 +200,7 @@
             } catch (error) {
                 console.error("Error fetching weather data:", error);
                 weatherInfoDiv.innerHTML = '';
-                warningMessageDiv.textContent = 'Could not retrieve weather data. Please try again later.';
+                warningMessageDiv.textContent = 'Could not retrieve weather data.';
                 warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium warning';
                 warningMessageDiv.style.display = 'block';
             }
@@ -194,7 +231,6 @@
             if (!rainChanceFound) {
                 displaySafeMessage();
             }
-            
             lastUpdatedSpan.textContent = now.toLocaleTimeString();
         }
 
@@ -212,10 +248,29 @@
             warningMessageDiv.style.display = 'block';
         }
 
-        // --- Initial Load and Interval ---
+        function loadSavedLocation() {
+            const savedLocation = localStorage.getItem('weatherLocation');
+            if (savedLocation) {
+                const { latitude, longitude, name } = JSON.parse(savedLocation);
+                updateLocation(latitude, longitude, name);
+            } else {
+                // Default location
+                updateLocation(41.50, -81.56, 'Cleveland Heights, Ohio');
+            }
+        }
+
+        // --- Initial Load and Event Listeners ---
+        locationForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const locationName = locationInput.value.trim();
+            if (locationName) {
+                getCoordinatesForLocation(locationName);
+            }
+        });
+        
         requestNotificationPermission();
-        getWeatherData();
-        setInterval(getWeatherData, REFRESH_INTERVAL);
+        loadSavedLocation();
     </script>
 </body>
 </html>
+

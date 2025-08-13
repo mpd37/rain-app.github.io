@@ -1,16 +1,12 @@
 // This is the service worker script, which works behind the scenes.
 
 // A name for our cache
-const CACHE_NAME = 'rain-warning-v1';
+const CACHE_NAME = 'rain-warning-v2'; // Incremented version to ensure updates
 
 // A list of files we want to cache.
-// This is the "app shell" - the minimal files needed to run.
 const urlsToCache = [
   '.', // This represents the root directory, which will cache index.html
   'manifest.json' 
-  // Note: We don't cache the external CSS and JS (Tailwind, Google Fonts)
-  // because they are on a different origin (CDN) and caching them is more complex.
-  // The app will still work offline, just without custom fonts if they aren't already cached by the browser.
 ];
 
 // Install event: opens the cache and adds the app shell files to it.
@@ -51,30 +47,30 @@ self.addEventListener('activate', event => {
 
 
 // Fetch event: serves assets from the cache first.
-// If the resource isn't in the cache, it tries to get it from the network.
 self.addEventListener('fetch', event => {
   // We only want to cache GET requests.
   if (event.request.method !== 'GET') {
     return;
   }
   
-  // For API calls, always go to the network.
-  if (event.request.url.includes('api.open-meteo.com')) {
+  // For API calls (weather and geocoding), always go to the network.
+  const isApiCall = event.request.url.includes('api.open-meteo.com') || event.request.url.includes('geocoding-api.open-meteo.com');
+  
+  if (isApiCall) {
     event.respondWith(fetch(event.request));
     return;
   }
 
+  // For other requests, use cache-first strategy.
   event.respondWith(
     caches.match(event.request)
       .then(response => {
         // If we have a match in the cache, return it.
         if (response) {
-          console.log('Service Worker: Fetching from cache:', event.request.url);
           return response;
         }
         
         // Otherwise, fetch from the network.
-        console.log('Service Worker: Fetching from network:', event.request.url);
         return fetch(event.request);
       })
   );
