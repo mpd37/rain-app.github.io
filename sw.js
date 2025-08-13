@@ -1,7 +1,7 @@
 // This is the service worker script, which works behind the scenes.
 
 // A name for our cache
-const CACHE_NAME = 'rain-warning-v2'; // Incremented version to ensure updates
+const CACHE_NAME = 'rain-warning-v4'; // IMPORTANT: Increment this version number
 
 // A list of files we want to cache.
 const urlsToCache = [
@@ -53,8 +53,10 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // For API calls (weather and geocoding), always go to the network.
-  const isApiCall = event.request.url.includes('api.open-meteo.com') || event.request.url.includes('geocoding-api.open-meteo.com');
+  // For API calls (weather, geocoding, reverse geocoding), always go to the network.
+  const isApiCall = event.request.url.includes('api.open-meteo.com') || 
+                    event.request.url.includes('geocoding-api.open-meteo.com') ||
+                    event.request.url.includes('nominatim.openstreetmap.org');
   
   if (isApiCall) {
     event.respondWith(fetch(event.request));
@@ -75,4 +77,3 @@ self.addEventListener('fetch', event => {
       })
   );
 });
-

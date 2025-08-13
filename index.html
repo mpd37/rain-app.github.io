@@ -10,6 +10,9 @@
     <meta name="theme-color" content="#ffffff">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js and the Annotation Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
         /* Custom Styles */
         body {
@@ -17,7 +20,6 @@
         }
         .weather-card {
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            transition: transform 0.3s ease-in-out;
         }
         .warning {
             background-color: #fef2f2; /* Red-50 */
@@ -49,31 +51,55 @@
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
 
-    <div class="weather-card bg-white rounded-xl p-8 max-w-md w-full">
+    <div class="weather-card bg-white rounded-xl p-6 md:p-8 max-w-lg w-full">
         <div class="text-center">
             <h1 class="text-2xl font-bold text-gray-800">Rain Warning</h1>
-            <p id="location-display" class="text-gray-500 mb-4">Loading location...</p>
+            <p id="location-display" class="text-gray-500 mb-4 h-6">Loading location...</p>
         </div>
 
-        <!-- Location Search Form -->
-        <form id="location-form" class="flex gap-2 mb-6">
-            <input type="text" id="location-input" placeholder="Enter a city..." class="flex-grow p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Search</button>
-        </form>
+        <!-- Location Controls -->
+        <div class="flex flex-col sm:flex-row gap-2 mb-2">
+            <form id="location-form" class="flex-grow flex gap-2">
+                <input type="text" id="location-input" placeholder="Enter a city..." class="flex-grow p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Search</button>
+            </form>
+            <button id="gps-button" class="bg-gray-600 hover:bg-gray-700 text-white font-bold p-2 rounded-lg transition-colors flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span class="ml-2 sm:hidden lg:inline">Use My Location</span>
+            </button>
+        </div>
+        
+        <!-- Settings Controls -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-4">
+            <div class="flex items-center gap-2">
+                <label for="threshold-input" class="text-sm font-medium text-gray-700">Warning Threshold (%):</label>
+                <input type="number" id="threshold-input" min="0" max="100" class="w-20 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex items-center gap-2">
+                <label for="time-format-toggle" class="text-sm font-medium text-gray-700">24-Hour Format</label>
+                <input type="checkbox" id="time-format-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
+            </div>
+        </div>
 
         <div id="weather-info" class="text-center">
             <div class="loader"></div>
             <p class="text-gray-600">Fetching latest weather data...</p>
         </div>
 
-        <div id="warning-message" class="mt-6 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
+        <div id="warning-message" class="mt-4 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
         
-        <div class="text-center mt-4 space-y-2">
+        <!-- Rain Probability Graph -->
+        <div class="mt-6">
+            <canvas id="rainChart"></canvas>
+        </div>
+
+        <div class="text-center mt-6 space-y-2">
              <button id="install-button" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                 Install App
             </button>
             <p class="text-xs text-gray-500">Notification Status: <span id="notification-status" class="font-semibold">Pending</span></p>
-            <p class="text-xs text-gray-400">Last updated: <span id="last-updated">Never</span></p>
+            <p class="text-xs text-gray-400">Forecast updated: <span id="last-updated">Never</span></p>
+            <p class="text-xs text-gray-400 mt-1">Weather data by <a href="https://open-meteo.com/" target="_blank" class="underline text-blue-600 hover:text-blue-800">Open-Meteo</a></p>
         </div>
     </div>
 
@@ -82,33 +108,29 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
-                    .then(registration => console.log('Service Worker registered:', registration))
-                    .catch(error => console.log('Service Worker registration failed:', error));
+                    .then(reg => console.log('Service Worker registered.'))
+                    .catch(err => console.log('Service Worker registration failed: ', err));
             });
         }
 
         // --- PWA Install Prompt ---
         let deferredPrompt;
         const installButton = document.getElementById('install-button');
-
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
             installButton.style.display = 'block';
         });
-
         installButton.addEventListener('click', async () => {
             if (deferredPrompt) {
                 deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                console.log(`User response to the install prompt: ${outcome}`);
+                await deferredPrompt.userChoice;
                 deferredPrompt = null;
                 installButton.style.display = 'none';
             }
         });
 
         // --- Configuration ---
-        const RAIN_PROBABILITY_THRESHOLD = 25;
         const FORECAST_HOURS = 12;
         const REFRESH_INTERVAL = 1200000; // 20 minutes
 
@@ -120,59 +142,156 @@
         const locationForm = document.getElementById('location-form');
         const locationInput = document.getElementById('location-input');
         const locationDisplay = document.getElementById('location-display');
+        const gpsButton = document.getElementById('gps-button');
+        const chartCanvas = document.getElementById('rainChart');
+        const thresholdInput = document.getElementById('threshold-input');
+        const timeFormatToggle = document.getElementById('time-format-toggle');
 
-        // --- App Logic ---
+        // --- App State ---
         let currentLatitude, currentLongitude;
         let weatherInterval;
+        let rainChart;
+        let rainProbabilityThreshold = 25;
+        let is24HourFormat = false;
+        let lastWeatherData = null;
 
+        // --- Chart Functions ---
+        function initializeChart() {
+            const ctx = chartCanvas.getContext('2d');
+            rainChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Chance of Rain (%)',
+                        data: [],
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Rain Probability (%)'
+                            }
+                        },
+                        x: {
+                           title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        annotation: {
+                            annotations: {
+                                thresholdLine: {
+                                    type: 'line',
+                                    yMin: rainProbabilityThreshold,
+                                    yMax: rainProbabilityThreshold,
+                                    borderColor: 'rgba(239, 68, 68, 0.8)',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5]
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart(labels, data) {
+            if (!rainChart) initializeChart();
+            rainChart.data.labels = labels;
+            rainChart.data.datasets[0].data = data;
+            rainChart.options.plugins.annotation.annotations.thresholdLine.yMin = rainProbabilityThreshold;
+            rainChart.options.plugins.annotation.annotations.thresholdLine.yMax = rainProbabilityThreshold;
+            rainChart.update();
+        }
+
+        // --- Notification Functions ---
         function requestNotificationPermission() {
             if (!("Notification" in window)) {
                 notificationStatusSpan.textContent = "Not Supported";
-                notificationStatusSpan.className = "font-semibold text-red-600";
                 return;
             }
             Notification.requestPermission().then(permission => {
                 notificationStatusSpan.textContent = permission === "granted" ? "Enabled" : "Disabled";
-                notificationStatusSpan.className = permission === "granted" ? "font-semibold text-green-600" : "font-semibold text-red-600";
             });
         }
         
         function sendNotification(title, body) {
             if (Notification.permission === "granted") {
-                navigator.serviceWorker.ready.then(registration => {
-                    registration.showNotification(title, { body: body, icon: 'icon-192.png' });
+                navigator.serviceWorker.ready.then(reg => {
+                    reg.showNotification(title, { body: body, icon: 'icon-192.png' });
                 });
             }
         }
 
+        // --- Location Functions ---
         async function getCoordinatesForLocation(locationName) {
-            weatherInfoDiv.innerHTML = '<div class="loader"></div><p class="text-gray-600">Finding location...</p>';
+            setLoadingState("Finding location...");
             const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
-            
             try {
                 const response = await fetch(geocodeUrl);
-                if (!response.ok) throw new Error('Geocoding API failed.');
                 const data = await response.json();
-
                 if (data.results && data.results.length > 0) {
-                    const location = data.results[0];
-                    const displayName = `${location.name}, ${location.admin1 || location.country}`;
-                    updateLocation(location.latitude, location.longitude, displayName);
-                    // Save to local storage
-                    localStorage.setItem('weatherLocation', JSON.stringify({
-                        latitude: location.latitude,
-                        longitude: location.longitude,
-                        name: displayName
-                    }));
+                    const loc = data.results[0];
+                    const displayName = `${loc.name}, ${loc.admin1 || loc.country}`;
+                    saveAndSetLocation(loc.latitude, loc.longitude, displayName);
                 } else {
-                    alert('Location not found. Please try again.');
-                    loadSavedLocation(); // Revert to last known location
+                    alert('Location not found.');
+                    loadSavedLocation();
                 }
             } catch (error) {
-                console.error("Error fetching coordinates:", error);
                 alert('Failed to find location.');
-                loadSavedLocation(); // Revert to last known location
+                loadSavedLocation();
             }
+        }
+
+        async function getLocationNameForCoordinates(lat, lon) {
+            setLoadingState("Getting location name...");
+            const reverseGeocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`;
+            try {
+                const response = await fetch(reverseGeocodeUrl);
+                const data = await response.json();
+                const address = data.address;
+                const displayName = address.city || address.town || address.village || 'Current Location';
+                saveAndSetLocation(lat, lon, displayName);
+            } catch (error) {
+                console.error("Reverse geocoding failed:", error);
+                saveAndSetLocation(lat, lon, `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`);
+            }
+        }
+        
+        function handleGpsClick() {
+            if (navigator.geolocation) {
+                setLoadingState("Getting GPS signal...");
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        getLocationNameForCoordinates(position.coords.latitude, position.coords.longitude);
+                    },
+                    (error) => {
+                        alert(`GPS Error: ${error.message}`);
+                        loadSavedLocation();
+                    }
+                );
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        }
+
+        function saveAndSetLocation(lat, lon, name) {
+            localStorage.setItem('weatherLocation', JSON.stringify({ latitude: lat, longitude: lon, name: name }));
+            updateLocation(lat, lon, name);
         }
 
         function updateLocation(lat, lon, name) {
@@ -185,32 +304,39 @@
             weatherInterval = setInterval(getWeatherData, REFRESH_INTERVAL);
         }
 
+        function loadSavedLocation() {
+            const savedLocation = localStorage.getItem('weatherLocation');
+            if (savedLocation) {
+                const { latitude, longitude, name } = JSON.parse(savedLocation);
+                updateLocation(latitude, longitude, name);
+            } else {
+                updateLocation(41.50, -81.56, 'Cleveland Heights, Ohio');
+            }
+        }
+
+        // --- Weather Data Functions ---
         async function getWeatherData() {
             if (!currentLatitude || !currentLongitude) return;
-
-            weatherInfoDiv.innerHTML = '<div class="loader"></div><p class="text-gray-600">Fetching latest weather data...</p>';
-            warningMessageDiv.style.display = 'none';
+            setLoadingState("Fetching weather data...");
             const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLatitude}&longitude=${currentLongitude}&hourly=precipitation_probability&forecast_days=1`;
-
             try {
                 const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const data = await response.json();
-                processWeatherData(data);
+                lastWeatherData = await response.json();
+                processWeatherData(lastWeatherData);
             } catch (error) {
-                console.error("Error fetching weather data:", error);
-                weatherInfoDiv.innerHTML = '';
-                warningMessageDiv.textContent = 'Could not retrieve weather data.';
-                warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium warning';
-                warningMessageDiv.style.display = 'block';
+                handleFetchError();
             }
         }
 
         function processWeatherData(data) {
-            weatherInfoDiv.innerHTML = '';
+            if (!data) return;
+            weatherInfoDiv.style.display = 'none';
             const hourlyData = data.hourly;
             const now = new Date();
             let rainChanceFound = false;
+            
+            const chartLabels = [];
+            const chartData = [];
 
             let currentHourIndex = hourlyData.time.findIndex(timeStr => new Date(timeStr) >= now);
             if (currentHourIndex === -1) currentHourIndex = 0;
@@ -219,11 +345,12 @@
                 const index = currentHourIndex + i;
                 if (index < hourlyData.precipitation_probability.length) {
                     const probability = hourlyData.precipitation_probability[index];
-                    if (probability >= RAIN_PROBABILITY_THRESHOLD) {
-                        const forecastTime = new Date(hourlyData.time[index]);
+                    const forecastTime = new Date(hourlyData.time[index]);
+                    chartLabels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
+                    chartData.push(probability);
+                    if (!rainChanceFound && probability >= rainProbabilityThreshold) {
                         displayWarning(probability, forecastTime);
                         rainChanceFound = true;
-                        break;
                     }
                 }
             }
@@ -231,44 +358,82 @@
             if (!rainChanceFound) {
                 displaySafeMessage();
             }
-            lastUpdatedSpan.textContent = now.toLocaleTimeString();
+            updateChart(chartLabels, chartData);
+            lastUpdatedSpan.textContent = now.toLocaleTimeString([], { hour12: !is24HourFormat });
+        }
+
+        // --- UI Helper Functions ---
+        function setLoadingState(message) {
+            weatherInfoDiv.style.display = 'block';
+            weatherInfoDiv.innerHTML = `<div class="loader"></div><p class="text-gray-600">${message}</p>`;
+            warningMessageDiv.style.display = 'none';
+        }
+
+        function handleFetchError() {
+            weatherInfoDiv.style.display = 'none';
+            warningMessageDiv.textContent = 'Could not retrieve weather data.';
+            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
+            warningMessageDiv.style.display = 'block';
         }
 
         function displayWarning(probability, time) {
-            const message = `Warning! There is a ${probability}% chance of rain around ${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+            const message = `Warning! There is a ${probability}% chance of rain around ${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !is24HourFormat })}.`;
             warningMessageDiv.innerHTML = `<strong>${message}</strong>`;
-            warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium warning';
+            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
             warningMessageDiv.style.display = 'block';
             sendNotification("Rain Alert!", `A ${probability}% chance of rain is expected soon.`);
         }
 
         function displaySafeMessage() {
-            warningMessageDiv.textContent = `No significant chance of rain (>= ${RAIN_PROBABILITY_THRESHOLD}%) in the next ${FORECAST_HOURS} hours.`;
-            warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium safe';
+            warningMessageDiv.textContent = `No significant chance of rain (>= ${rainProbabilityThreshold}%) in the next ${FORECAST_HOURS} hours.`;
+            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium safe';
             warningMessageDiv.style.display = 'block';
         }
 
-        function loadSavedLocation() {
-            const savedLocation = localStorage.getItem('weatherLocation');
-            if (savedLocation) {
-                const { latitude, longitude, name } = JSON.parse(savedLocation);
-                updateLocation(latitude, longitude, name);
-            } else {
-                // Default location
-                updateLocation(41.50, -81.56, 'Cleveland Heights, Ohio');
+        // --- Settings Functions ---
+        function loadSavedSettings() {
+            const savedThreshold = localStorage.getItem('rainWarningThreshold');
+            if (savedThreshold) {
+                rainProbabilityThreshold = parseInt(savedThreshold, 10);
             }
+            thresholdInput.value = rainProbabilityThreshold;
+
+            const savedTimeFormat = localStorage.getItem('is24HourFormat');
+            if (savedTimeFormat) {
+                is24HourFormat = savedTimeFormat === 'true';
+            }
+            timeFormatToggle.checked = is24HourFormat;
+        }
+
+        function handleThresholdChange() {
+            const newThreshold = parseInt(thresholdInput.value, 10);
+            if (!isNaN(newThreshold) && newThreshold >= 0 && newThreshold <= 100) {
+                rainProbabilityThreshold = newThreshold;
+                localStorage.setItem('rainWarningThreshold', newThreshold);
+                processWeatherData(lastWeatherData);
+            }
+        }
+
+        function handleTimeFormatChange() {
+            is24HourFormat = timeFormatToggle.checked;
+            localStorage.setItem('is24HourFormat', is24HourFormat);
+            processWeatherData(lastWeatherData);
         }
 
         // --- Initial Load and Event Listeners ---
         locationForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const locationName = locationInput.value.trim();
-            if (locationName) {
-                getCoordinatesForLocation(locationName);
-            }
+            if (locationName) getCoordinatesForLocation(locationName);
         });
         
+        gpsButton.addEventListener('click', handleGpsClick);
+        thresholdInput.addEventListener('change', handleThresholdChange);
+        timeFormatToggle.addEventListener('change', handleTimeFormatChange);
+        
+        initializeChart();
         requestNotificationPermission();
+        loadSavedSettings();
         loadSavedLocation();
     </script>
 </body>
