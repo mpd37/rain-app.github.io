@@ -348,7 +348,7 @@
                     const forecastTime = new Date(hourlyData.time[index]);
                     chartLabels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
                     chartData.push(probability);
-                    if (!rainChanceFound && probability >= rainProbabilityThreshold) {
+                    if (!rainChanceFound && probability > rainProbabilityThreshold) {
                         displayWarning(probability, forecastTime);
                         rainChanceFound = true;
                     }
@@ -385,7 +385,7 @@
         }
 
         function displaySafeMessage() {
-            warningMessageDiv.textContent = `No significant chance of rain (>= ${rainProbabilityThreshold}%) in the next ${FORECAST_HOURS} hours.`;
+            warningMessageDiv.textContent = `No significant chance of rain (> ${rainProbabilityThreshold}%) in the next ${FORECAST_HOURS} hours.`;
             warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium safe';
             warningMessageDiv.style.display = 'block';
         }
