@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rain Warning</title>
+    <!-- PWA Manifest Link -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Theme Color for PWA -->
+    <meta name="theme-color" content="#ffffff">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Styles */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .weather-card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease-in-out;
+        }
+        .warning {
+            background-color: #fef2f2; /* Red-50 */
+            border-left: 4px solid #ef4444; /* Red-500 */
+            color: #b91c1c; /* Red-700 */
+        }
+        .safe {
+            background-color: #f0fdf4; /* Green-50 */
+            border-left: 4px solid #22c55e; /* Green-500 */
+            color: #15803d; /* Green-700 */
+        }
+        .loader {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #install-button {
+            display: none; /* Hidden by default */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="weather-card bg-white rounded-xl p-8 max-w-md w-full">
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-gray-800">Rain Warning</h1>
+            <p class="text-gray-500 mb-6">Cleveland Heights, Ohio</p>
+        </div>
+
+        <div id="weather-info" class="text-center">
+            <div class="loader"></div>
+            <p class="text-gray-600">Fetching latest weather data...</p>
+        </div>
+
+        <div id="warning-message" class="mt-6 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
+        
+        <div class="text-center mt-4 space-y-2">
+             <button id="install-button" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Install App
+            </button>
+            <p class="text-xs text-gray-500">Notification Status: <span id="notification-status" class="font-semibold">Pending</span></p>
+            <p class="text-xs text-gray-400">Last updated: <span id="last-updated">Never</span></p>
+        </div>
+    </div>
+
+    <script>
+        // --- PWA Service Worker Registration ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => console.log('Service Worker registered:', registration))
+                    .catch(error => console.log('Service Worker registration failed:', error));
+            });
+        }
+
+        // --- PWA Install Prompt ---
+        let deferredPrompt;
+        const installButton = document.getElementById('install-button');
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent the mini-infobar from appearing on mobile
+            e.preventDefault();
+            // Stash the event so it can be triggered later.
+            deferredPrompt = e;
+            // Update UI to show the install button
+            installButton.style.display = 'block';
+        });
+
+        installButton.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                // Show the install prompt
+                deferredPrompt.prompt();
+                // Wait for the user to respond to the prompt
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log(`User response to the install prompt: ${outcome}`);
+                // We've used the prompt, and can't use it again, throw it away
+                deferredPrompt = null;
+                // Hide the install button
+                installButton.style.display = 'none';
+            }
+        });
+
+        // --- Configuration ---
+        const LATITUDE = 41.50;
+        const LONGITUDE = -81.56;
+        const RAIN_PROBABILITY_THRESHOLD = 25;
+        const FORECAST_HOURS = 12;
+        const REFRESH_INTERVAL = 1200000; // 20 minutes
+
+        // --- DOM Elements ---
+        const weatherInfoDiv = document.getElementById('weather-info');
+        const warningMessageDiv = document.getElementById('warning-message');
+        const lastUpdatedSpan = document.getElementById('last-updated');
+        const notificationStatusSpan = document.getElementById('notification-status');
+
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                notificationStatusSpan.textContent = "Not Supported";
+                notificationStatusSpan.className = "font-semibold text-red-600";
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    notificationStatusSpan.textContent = "Enabled";
+                    notificationStatusSpan.className = "font-semibold text-green-600";
+                } else {
+                    notificationStatusSpan.textContent = "Disabled";
+                    notificationStatusSpan.className = "font-semibold text-red-600";
+                }
+            });
+        }
+        
+        function sendNotification(title, body) {
+            if (Notification.permission === "granted") {
+                // Use the service worker to show the notification
+                navigator.serviceWorker.ready.then(registration => {
+                    registration.showNotification(title, {
+                        body: body,
+                        icon: 'icon-192.png' // Using an icon from manifest
+                    });
+                });
+            }
+        }
+
+        async function getWeatherData() {
+            weatherInfoDiv.innerHTML = '<div class="loader"></div><p class="text-gray-600">Fetching latest weather data...</p>';
+            warningMessageDiv.style.display = 'none';
+            const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${LATITUDE}&longitude=${LONGITUDE}&hourly=precipitation_probability&forecast_days=1`;
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                processWeatherData(data);
+            } catch (error) {
+                console.error("Error fetching weather data:", error);
+                weatherInfoDiv.innerHTML = '';
+                warningMessageDiv.textContent = 'Could not retrieve weather data. Please try again later.';
+                warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium warning';
+                warningMessageDiv.style.display = 'block';
+            }
+        }
+
+        function processWeatherData(data) {
+            weatherInfoDiv.innerHTML = '';
+            const hourlyData = data.hourly;
+            const now = new Date();
+            let rainChanceFound = false;
+
+            let currentHourIndex = hourlyData.time.findIndex(timeStr => new Date(timeStr) >= now);
+            if (currentHourIndex === -1) currentHourIndex = 0;
+
+            for (let i = 0; i < FORECAST_HOURS; i++) {
+                const index = currentHourIndex + i;
+                if (index < hourlyData.precipitation_probability.length) {
+                    const probability = hourlyData.precipitation_probability[index];
+                    if (probability >= RAIN_PROBABILITY_THRESHOLD) {
+                        const forecastTime = new Date(hourlyData.time[index]);
+                        displayWarning(probability, forecastTime);
+                        rainChanceFound = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!rainChanceFound) {
+                displaySafeMessage();
+            }
+            
+            lastUpdatedSpan.textContent = now.toLocaleTimeString();
+        }
+
+        function displayWarning(probability, time) {
+            const message = `Warning! There is a ${probability}% chance of rain around ${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+            warningMessageDiv.innerHTML = `<strong>${message}</strong>`;
+            warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium warning';
+            warningMessageDiv.style.display = 'block';
+            sendNotification("Rain Alert!", `A ${probability}% chance of rain is expected soon.`);
+        }
+
+        function displaySafeMessage() {
+            warningMessageDiv.textContent = `No significant chance of rain (>= ${RAIN_PROBABILITY_THRESHOLD}%) in the next ${FORECAST_HOURS} hours.`;
+            warningMessageDiv.className = 'mt-6 p-4 rounded-lg text-center font-medium safe';
+            warningMessageDiv.style.display = 'block';
+        }
+
+        // --- Initial Load and Interval ---
+        requestNotificationPermission();
+        getWeatherData();
+        setInterval(getWeatherData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
