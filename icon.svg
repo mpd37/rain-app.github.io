@@ -9,6 +9,6 @@
     <path d="M320 328C320 305.909 337.909 288 360 288C382.091 288 400 305.909 400 328C400 364 360 400 360 400C360 400 320 364 320 328Z" fill="#D0F2FE" transform="rotate(180 360 344)"/>
 
     <!-- Red Exclamation Mark -->
-    <rect x="400" y="90" width="16" height="48" rx="8" fill="#EF4444"/>
-    <rect x="400" y="142" width="16" height="16" rx="8" fill="#EF4444"/>
+    <rect x="400" y="90" width="48" height="200" rx="8" fill="#EF4444"/>
+    <rect x="400" y="320" width="48" height="48" rx="8" fill="#EF4444"/>
 </svg>
