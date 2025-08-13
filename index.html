@@ -310,7 +310,8 @@
                 const { latitude, longitude, name } = JSON.parse(savedLocation);
                 updateLocation(latitude, longitude, name);
             } else {
-                updateLocation(41.50, -81.56, 'Cleveland Heights, Ohio');
+                // Default location set to Kigali, Rwanda
+                updateLocation(-1.9441, 30.0619, 'Kigali, Rwanda');
             }
         }
 
