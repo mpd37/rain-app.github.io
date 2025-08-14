@@ -45,6 +45,12 @@
         #install-button {
             display: none; /* Hidden by default */
         }
+        /* FIX: Added a container for the chart to control its height */
+        .chart-container {
+            position: relative;
+            height: 40vh; /* Give the chart a responsive height */
+            width: 100%;
+        }
     </style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
@@ -109,7 +115,7 @@
 
         <div id="warning-message" class="mt-4 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
         
-        <div class="mt-6">
+        <div class="mt-6 chart-container">
             <canvas id="rainChart"></canvas>
         </div>
 
@@ -435,6 +441,8 @@
                     ]
                 },
                 options: {
+                    // FIX: Allow chart to fill container, preventing squishing
+                    maintainAspectRatio: false,
                     scales: {
                         y: { beginAtZero: true, max: 100, title: { display: true, text: t('chart_y_label') } },
                         x: { title: { display: true, text: t('chart_x_label') } }
@@ -891,5 +899,3 @@
     </script>
 </body>
 </html>
-
-
