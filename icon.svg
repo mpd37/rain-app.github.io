@@ -7,7 +7,7 @@
     
     <!-- Rotated Droplet Shape -->
     <g transform="rotate(180 50 50)" filter="url(#pinShadow)">
-        <path d="M50 10C36.1929 10 25 21.1929 25 35C25 55 50 85 50 85C50 85 75 55 75 35C75 21.1929 63.8071 10 50 10Z" fill="white"/>
+        <path d="M50 10C36.1929 10 25 21.1929 25 35C25 55 50 85 50 85C50 85 75 55 75 35C75 21.1929 63.8071 10 50 10Z" fill="#E5E7EB"/>
     </g>
     
     <!-- Upright Exclamation Mark (Vertically Centered) -->
