@@ -441,7 +441,6 @@
                     ]
                 },
                 options: {
-                    // FIX: Allow chart to fill container, preventing squishing
                     maintainAspectRatio: false,
                     scales: {
                         y: { beginAtZero: true, max: 100, title: { display: true, text: t('chart_y_label') } },
@@ -608,7 +607,8 @@
                 const { latitude, longitude, name } = JSON.parse(savedLocation);
                 updateLocation(latitude, longitude, name);
             } else {
-                updateLocation(41.509, -81.506, 'South Euclid, OH'); 
+                // Default location set to Vancouver
+                updateLocation(49.2827, -123.1207, 'Vancouver, BC'); 
             }
         }
 
