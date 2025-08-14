@@ -45,10 +45,9 @@
         #install-button {
             display: none; /* Hidden by default */
         }
-        /* FIX: Added a container for the chart to control its height */
         .chart-container {
             position: relative;
-            height: 40vh; /* Give the chart a responsive height */
+            height: 40vh; 
             width: 100%;
         }
     </style>
@@ -71,7 +70,6 @@
             </button>
         </div>
         
-        <!-- Simplified Settings Controls -->
         <details class="mb-4">
             <summary class="cursor-pointer text-sm font-medium text-gray-600" data-translate="settings">Settings</summary>
             <div class="mt-2 p-4 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
@@ -94,6 +92,10 @@
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="confidence-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
                     <label for="confidence-toggle" class="text-gray-700" data-translate="confidence_label">Confidence</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="show-ensemble-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
+                    <label for="show-ensemble-toggle" class="text-gray-700" data-translate="show_ensemble_label">Show Models</label>
                 </div>
                 <div class="col-span-2 md:col-span-1">
                     <label for="language-select" class="sr-only" data-translate="language_label">Language:</label>
@@ -145,6 +147,7 @@
                 forecast_window_label: "Hours:",
                 time_format_label: "24-Hour",
                 confidence_label: "Confidence",
+                show_ensemble_label: "Show Models",
                 alpha_label: "Alpha:",
                 language_label: "Language:",
                 fetching_forecast: "Fetching ensemble forecast...",
@@ -182,6 +185,7 @@
                 forecast_window_label: "Horas:",
                 time_format_label: "Formato 24h",
                 confidence_label: "Confianza",
+                show_ensemble_label: "Mostrar Modelos",
                 alpha_label: "Alfa:",
                 language_label: "Idioma:",
                 fetching_forecast: "Obteniendo pronóstico...",
@@ -219,6 +223,7 @@
                 forecast_window_label: "Stunden:",
                 time_format_label: "24-Stunden",
                 confidence_label: "Konfidenz",
+                show_ensemble_label: "Modelle anzeigen",
                 alpha_label: "Alpha:",
                 language_label: "Sprache:",
                 fetching_forecast: "Ensemble-Vorhersage wird abgerufen...",
@@ -256,6 +261,7 @@
                 forecast_window_label: "Heures:",
                 time_format_label: "Format 24h",
                 confidence_label: "Confiance",
+                show_ensemble_label: "Afficher les modèles",
                 alpha_label: "Alpha :",
                 language_label: "Langue :",
                 fetching_forecast: "Récupération des prévisions d'ensemble...",
@@ -293,6 +299,7 @@
                 forecast_window_label: "時間:",
                 time_format_label: "24時間表示",
                 confidence_label: "信頼区間",
+                show_ensemble_label: "モデルを表示",
                 alpha_label: "アルファ:",
                 language_label: "言語:",
                 fetching_forecast: "アンサンブル予報を取得中...",
@@ -365,6 +372,7 @@
         const forecastHoursInput = document.getElementById('forecast-hours-input');
         const timeFormatToggle = document.getElementById('time-format-toggle');
         const confidenceToggle = document.getElementById('confidence-toggle');
+        const showEnsembleToggle = document.getElementById('show-ensemble-toggle');
         const alphaInput = document.getElementById('alpha-input');
         const languageSelect = document.getElementById('language-select');
         const dataSourceP = document.getElementById('data-source');
@@ -377,6 +385,7 @@
         let forecastHours = 12;
         let is24HourFormat = false;
         let showConfidenceBounds = false;
+        let showEnsembleMembers = false;
         let alpha = 0.25;
         let currentLanguage = 'en';
         let lastEnsembleData = null;
@@ -486,13 +495,15 @@
                 const label = item.text;
                 if (['Ensemble Avg', 'Confidence Bound'].includes(label)) return true;
                 if (label === 'Lower Bound') return false;
-                return activeModels.includes(label.toUpperCase());
+                return activeModels.includes(label.toUpperCase()) && showEnsembleMembers;
             };
 
             rainChart.data.datasets.forEach(dataset => {
                 const label = dataset.label;
                 if (['Ensemble Avg', 'Confidence Bound', 'Lower Bound'].includes(label)) return;
-                dataset.hidden = !activeModels.includes(label.toUpperCase());
+                
+                const isInactive = !activeModels.includes(label.toUpperCase());
+                dataset.hidden = isInactive || !showEnsembleMembers;
             });
 
             rainChart.data.labels = labels;
@@ -607,7 +618,6 @@
                 const { latitude, longitude, name } = JSON.parse(savedLocation);
                 updateLocation(latitude, longitude, name);
             } else {
-                // Default location set to Vancouver
                 updateLocation(49.2827, -123.1207, 'Vancouver, BC'); 
             }
         }
@@ -811,6 +821,9 @@
             showConfidenceBounds = localStorage.getItem('showConfidenceBounds') === 'true';
             confidenceToggle.checked = showConfidenceBounds;
 
+            showEnsembleMembers = localStorage.getItem('showEnsembleMembers') === 'true';
+            showEnsembleToggle.checked = showEnsembleMembers;
+
             const savedAlpha = localStorage.getItem('quantileAlpha');
             if (savedAlpha) alpha = parseFloat(savedAlpha);
             alphaInput.value = alpha;
@@ -853,6 +866,12 @@
                 rainChart.update('none');
             }
         }
+        
+        function handleShowEnsembleMembersChange() {
+            showEnsembleMembers = showEnsembleToggle.checked;
+            localStorage.setItem('showEnsembleMembers', showEnsembleMembers);
+            if(lastEnsembleData) processEnsembleData(lastEnsembleData);
+        }
 
         function handleAlphaChange() {
             const newAlpha = parseFloat(alphaInput.value);
@@ -888,6 +907,7 @@
             forecastHoursInput.addEventListener('change', handleForecastHoursChange);
             timeFormatToggle.addEventListener('change', handleTimeFormatChange);
             confidenceToggle.addEventListener('change', handleConfidenceToggle);
+            showEnsembleToggle.addEventListener('change', handleShowEnsembleMembersChange);
             alphaInput.addEventListener('change', handleAlphaChange);
             languageSelect.addEventListener('change', (e) => setLanguage(e.target.value));
             

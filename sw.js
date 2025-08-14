@@ -1,6 +1,6 @@
 // A simple caching service worker
 
-const CACHE_NAME = 'rain-warning-cache-v2';
+const CACHE_NAME = 'rain-warning-cache-v4';
 const urlsToCache = [
   '/',
   '/index.html',
