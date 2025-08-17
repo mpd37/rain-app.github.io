@@ -9,8 +9,6 @@
     <meta name="theme-color" content="#ffffff">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
         /* Custom Styles */
         body {
@@ -56,14 +54,14 @@
 
     <div class="weather-card bg-white rounded-xl p-6 md:p-8 max-w-lg w-full">
         <div class="text-center mb-4">
-            <h1 class="text-3xl font-bold text-gray-800" data-translate="title">Rain Warning</h1>
-            <p id="location-display" class="text-gray-500 h-6" data-translate="loading_location">Loading location...</p>
+            <h1 class="text-3xl font-bold text-gray-800">Rain Warning</h1>
+            <p id="location-display" class="text-gray-500 h-6">Loading location...</p>
         </div>
 
         <div class="flex flex-col sm:flex-row gap-2 mb-4">
             <form id="location-form" class="flex-grow flex">
-                <input type="text" id="location-input" placeholder="Enter a city..." data-translate-placeholder="city_placeholder" class="flex-grow p-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 rounded-r-md transition-colors" data-translate="search">Search</button>
+                <input type="text" id="location-input" placeholder="Enter a city..." class="flex-grow p-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 rounded-r-md transition-colors">Search</button>
             </form>
             <button id="gps-button" title="Use My Location" class="bg-gray-600 hover:bg-gray-700 text-white font-bold p-2 rounded-lg transition-colors flex items-center justify-center">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
@@ -71,40 +69,41 @@
         </div>
         
         <details class="mb-4">
-            <summary class="cursor-pointer text-sm font-medium text-gray-600" data-translate="settings">Settings</summary>
+            <summary class="cursor-pointer text-sm font-medium text-gray-600">Settings</summary>
             <div class="mt-2 p-4 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 <div class="flex items-center gap-2">
-                    <label for="threshold-input" class="font-medium text-gray-700" data-translate="threshold_label">Threshold:</label>
+                    <label for="threshold-input" class="font-medium text-gray-700">Warning Threshold:</label>
                     <input type="number" id="threshold-input" min="0" max="100" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
                 </div>
                  <div class="flex items-center gap-2">
-                    <label for="forecast-hours-input" class="font-medium text-gray-700" data-translate="forecast_window_label">Hours:</label>
+                    <label for="forecast-hours-input" class="font-medium text-gray-700">Hours:</label>
                     <input type="number" id="forecast-hours-input" min="1" max="24" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
                 </div>
                 <div class="flex items-center gap-2">
-                    <label for="alpha-input" class="font-medium text-gray-700" data-translate="alpha_label">Alpha:</label>
+                    <label for="alpha-input" class="font-medium text-gray-700">&alpha; Quantile:</label>
                     <input type="number" id="alpha-input" min="0.01" max="0.5" step="0.01" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="time-format-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
-                    <label for="time-format-toggle" class="text-gray-700" data-translate="time_format_label">24-Hour</label>
+                    <label for="time-format-toggle" class="text-gray-700">24-Hour</label>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="confidence-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
-                    <label for="confidence-toggle" class="text-gray-700" data-translate="confidence_label">Confidence</label>
+                    <label for="confidence-toggle" class="text-gray-700">Show Confidence Intervals</label>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="show-ensemble-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
-                    <label for="show-ensemble-toggle" class="text-gray-700" data-translate="show_ensemble_label">Show Models</label>
+                    <label for="show-ensemble-toggle" class="text-gray-700">Show Models</label>
                 </div>
-                <div class="col-span-2 md:col-span-1">
-                    <label for="language-select" class="sr-only" data-translate="language_label">Language:</label>
-                    <select id="language-select" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="en">English</option>
-                        <option value="es">Español</option>
-                        <option value="de">Deutsch</option>
-                        <option value="fr">Français</option>
-                        <option value="ja">日本語</option>
+                 <div class="flex items-center gap-2">
+                    <input type="checkbox" id="show-amount-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500">
+                    <label for="show-amount-toggle" class="text-gray-700">Show Amount</label>
+                </div>
+                 <div class="col-span-2 md:col-span-1">
+                    <label for="unit-system-select" class="sr-only">Unit System:</label>
+                    <select id="unit-system-select" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="metric">Metric</option>
+                        <option value="imperial">Imperial</option>
                     </select>
                 </div>
             </div>
@@ -112,7 +111,7 @@
 
         <div id="weather-info" class="text-center">
             <div class="loader"></div>
-            <p class="text-gray-600" data-translate="fetching_forecast">Fetching ensemble forecast...</p>
+            <p class="text-gray-600">Fetching ensemble forecast...</p>
         </div>
 
         <div id="warning-message" class="mt-4 p-4 rounded-lg text-center font-medium" style="display: none;"></div>
@@ -122,780 +121,615 @@
         </div>
 
         <div class="text-center mt-6 space-y-2">
-             <button id="install-button" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition-colors" data-translate="install_app">
+             <button id="install-button" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                 Install App
             </button>
             <div class="text-xs text-gray-400 flex justify-between">
-                <p><span data-translate="notification_status_label">Notifications:</span> <span id="notification-status" class="font-semibold" data-translate="pending">Pending</span></p>
-                <p><span data-translate="updated_label">Updated:</span> <span id="last-updated" data-translate="never">Never</span></p>
+                <p>Notifications: <span id="notification-status" class="font-semibold">Pending</span></p>
+                <p>Updated: <span id="last-updated">Never</span></p>
             </div>
-            <p id="data-source" class="text-xs text-gray-400 mt-1" data-translate="data_sources">Weather data sources</p>
+            <p id="data-source" class="text-xs text-gray-400 mt-1">Weather data sources</p>
         </div>
     </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 
     <script>
-        // --- Translations ---
-        const translations = {
-            en: {
-                title: "Rain Warning",
-                settings: "Settings",
-                loading_location: "Loading location...",
-                city_placeholder: "Enter a city...",
-                search: "Search",
-                use_my_location: "Use My Location",
-                threshold_label: "Threshold:",
-                forecast_window_label: "Hours:",
-                time_format_label: "24-Hour",
-                confidence_label: "Confidence",
-                show_ensemble_label: "Show Models",
-                alpha_label: "Alpha:",
-                language_label: "Language:",
-                fetching_forecast: "Fetching ensemble forecast...",
-                install_app: "Install App",
-                notification_status_label: "Notifications:",
-                pending: "Pending",
-                updated_label: "Updated:",
-                never: "Never",
-                data_sources: "Weather data sources",
-                finding_location: "Finding location...",
-                getting_gps: "Getting GPS signal...",
-                getting_location_name: "Getting location name...",
-                location_not_found: "Location not found.",
-                failed_to_find_location: "Failed to find location.",
-                gps_error: "GPS Error: ",
-                not_supported: "Not Supported",
-                enabled: "Enabled",
-                disabled: "Disabled",
-                warning_message: "Warning! There is a {probability}% chance of rain around {time}.",
-                safe_message: "No significant chance of rain (≥ {threshold}%) in the next {hours} hours.",
-                invalid_data: "Invalid data format from API.",
-                fetch_error: "Could not retrieve weather data.",
-                api_error: "API Error: {reason}",
-                chart_y_label: "Rain Probability (%)",
-                chart_x_label: "Time"
-            },
-            es: {
-                title: "Alerta de Lluvia",
-                settings: "Ajustes",
-                loading_location: "Cargando ubicación...",
-                city_placeholder: "Ingrese una ciudad...",
-                search: "Buscar",
-                use_my_location: "Usar mi ubicación",
-                threshold_label: "Umbral:",
-                forecast_window_label: "Horas:",
-                time_format_label: "Formato 24h",
-                confidence_label: "Confianza",
-                show_ensemble_label: "Mostrar Modelos",
-                alpha_label: "Alfa:",
-                language_label: "Idioma:",
-                fetching_forecast: "Obteniendo pronóstico...",
-                install_app: "Instalar Aplicación",
-                notification_status_label: "Notificaciones:",
-                pending: "Pendiente",
-                updated_label: "Actualizado:",
-                never: "Nunca",
-                data_sources: "Fuentes de datos meteorológicos",
-                finding_location: "Buscando ubicación...",
-                getting_gps: "Obteniendo señal GPS...",
-                getting_location_name: "Obteniendo nombre de la ubicación...",
-                location_not_found: "Ubicación no encontrada.",
-                failed_to_find_location: "No se pudo encontrar la ubicación.",
-                gps_error: "Error de GPS: ",
-                not_supported: "No Soportado",
-                enabled: "Habilitado",
-                disabled: "Deshabilitado",
-                warning_message: "¡Atención! Hay un {probability}% de probabilidad de lluvia cerca de las {time}.",
-                safe_message: "No hay probabilidad significativa de lluvia (≥ {threshold}%) en las próximas {hours} horas.",
-                invalid_data: "Formato de datos de la API no válido.",
-                fetch_error: "No se pudieron obtener los datos meteorológicos.",
-                api_error: "Error de API: {reason}",
-                chart_y_label: "Probabilidad de Lluvia (%)",
-                chart_x_label: "Hora"
-            },
-            de: {
-                title: "Regenwarnung",
-                settings: "Einstellungen",
-                loading_location: "Standort wird geladen...",
-                city_placeholder: "Stadt eingeben...",
-                search: "Suchen",
-                use_my_location: "Meinen Standort verwenden",
-                threshold_label: "Schwellenwert:",
-                forecast_window_label: "Stunden:",
-                time_format_label: "24-Stunden",
-                confidence_label: "Konfidenz",
-                show_ensemble_label: "Modelle anzeigen",
-                alpha_label: "Alpha:",
-                language_label: "Sprache:",
-                fetching_forecast: "Ensemble-Vorhersage wird abgerufen...",
-                install_app: "App installieren",
-                notification_status_label: "Benachrichtigungen:",
-                pending: "Ausstehend",
-                updated_label: "Aktualisiert:",
-                never: "Niemals",
-                data_sources: "Wetterdatenquellen",
-                finding_location: "Standort wird gesucht...",
-                getting_gps: "GPS-Signal wird abgerufen...",
-                getting_location_name: "Standortname wird abgerufen...",
-                location_not_found: "Standort nicht gefunden.",
-                failed_to_find_location: "Standort konnte nicht gefunden werden.",
-                gps_error: "GPS-Fehler: ",
-                not_supported: "Nicht unterstützt",
-                enabled: "Aktiviert",
-                disabled: "Deaktiviert",
-                warning_message: "Warnung! Es besteht eine {probability}% Regenwahrscheinlichkeit gegen {time}.",
-                safe_message: "Keine signifikante Regenwahrscheinlichkeit (≥ {threshold}%) in den nächsten {hours} Stunden.",
-                invalid_data: "Ungültiges Datenformat von der API.",
-                fetch_error: "Wetterdaten konnten nicht abgerufen werden.",
-                api_error: "API-Fehler: {reason}",
-                chart_y_label: "Regenwahrscheinlichkeit (%)",
-                chart_x_label: "Zeit"
-            },
-            fr: {
-                title: "Alerte Pluie",
-                settings: "Paramètres",
-                loading_location: "Chargement de l'emplacement...",
-                city_placeholder: "Entrez une ville...",
-                search: "Rechercher",
-                use_my_location: "Utiliser ma position",
-                threshold_label: "Seuil:",
-                forecast_window_label: "Heures:",
-                time_format_label: "Format 24h",
-                confidence_label: "Confiance",
-                show_ensemble_label: "Afficher les modèles",
-                alpha_label: "Alpha :",
-                language_label: "Langue :",
-                fetching_forecast: "Récupération des prévisions d'ensemble...",
-                install_app: "Installer l'application",
-                notification_status_label: "Notifications :",
-                pending: "En attente",
-                updated_label: "Mise à jour :",
-                never: "Jamais",
-                data_sources: "Sources de données météorologiques",
-                finding_location: "Recherche de l'emplacement...",
-                getting_gps: "Obtention du signal GPS...",
-                getting_location_name: "Obtention du nom de l'emplacement...",
-                location_not_found: "Emplacement non trouvé.",
-                failed_to_find_location: "Échec de la recherche de l'emplacement.",
-                gps_error: "Erreur GPS : ",
-                not_supported: "Non supporté",
-                enabled: "Activé",
-                disabled: "Désactivé",
-                warning_message: "Attention ! Il y a {probability}% de chance de pluie vers {time}.",
-                safe_message: "Aucune chance significative de pluie (≥ {threshold}%) dans les {hours} prochaines heures.",
-                invalid_data: "Format de données de l'API invalide.",
-                fetch_error: "Impossible de récupérer les données météorologiques.",
-                api_error: "Erreur API : {reason}",
-                chart_y_label: "Probabilité de pluie (%)",
-                chart_x_label: "Heure"
-            },
-            ja: {
-                title: "降雨警告",
-                settings: "設定",
-                loading_location: "場所を読み込み中...",
-                city_placeholder: "都市名を入力...",
-                search: "検索",
-                use_my_location: "現在地を使用",
-                threshold_label: "しきい値:",
-                forecast_window_label: "時間:",
-                time_format_label: "24時間表示",
-                confidence_label: "信頼区間",
-                show_ensemble_label: "モデルを表示",
-                alpha_label: "アルファ:",
-                language_label: "言語:",
-                fetching_forecast: "アンサンブル予報を取得中...",
-                install_app: "アプリをインストール",
-                notification_status_label: "通知:",
-                pending: "保留中",
-                updated_label: "更新:",
-                never: "なし",
-                data_sources: "気象データソース",
-                finding_location: "場所を検索中...",
-                getting_gps: "GPS信号を取得中...",
-                getting_location_name: "場所名を取得中...",
-                location_not_found: "場所が見つかりません。",
-                failed_to_find_location: "場所の検索に失敗しました。",
-                gps_error: "GPSエラー: ",
-                not_supported: "非対応",
-                enabled: "有効",
-                disabled: "無効",
-                warning_message: "警告！{time}頃に{probability}%の確率で雨が降る可能性があります。",
-                safe_message: "今後{hours}時間以内に有意な降雨の可能性（≥ {threshold}%）はありません。",
-                invalid_data: "APIからのデータ形式が無効です。",
-                fetch_error: "気象データを取得できませんでした。",
-                api_error: "APIエラー: {reason}",
-                chart_y_label: "降水確率 (%)",
-                chart_x_label: "時間"
-            }
-        };
-
-        // --- PWA Service Worker Registration ---
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Service Worker registered.'))
-                    .catch(err => console.log('Service Worker registration failed: ', err));
-            });
-        }
-
-        // --- PWA Install Prompt ---
-        let deferredPrompt;
-        const installButton = document.getElementById('install-button');
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            installButton.style.display = 'block';
-        });
-        installButton.addEventListener('click', async () => {
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                installButton.style.display = 'none';
-            }
-        });
-
-        // --- Configuration ---
-        const REFRESH_INTERVAL = 1200000; // 20 minutes
-        const WEATHER_MODELS = 'gfs_seamless,ecmwf_ifs,icon_seamless';
-
-        // --- DOM Elements ---
-        const weatherInfoDiv = document.getElementById('weather-info');
-        const warningMessageDiv = document.getElementById('warning-message');
-        const lastUpdatedSpan = document.getElementById('last-updated');
-        const notificationStatusSpan = document.getElementById('notification-status');
-        const locationForm = document.getElementById('location-form');
-        const locationInput = document.getElementById('location-input');
-        const locationDisplay = document.getElementById('location-display');
-        const gpsButton = document.getElementById('gps-button');
-        const chartCanvas = document.getElementById('rainChart');
-        const thresholdInput = document.getElementById('threshold-input');
-        const forecastHoursInput = document.getElementById('forecast-hours-input');
-        const timeFormatToggle = document.getElementById('time-format-toggle');
-        const confidenceToggle = document.getElementById('confidence-toggle');
-        const showEnsembleToggle = document.getElementById('show-ensemble-toggle');
-        const alphaInput = document.getElementById('alpha-input');
-        const languageSelect = document.getElementById('language-select');
-        const dataSourceP = document.getElementById('data-source');
-
-        // --- App State ---
-        let currentLatitude, currentLongitude;
-        let weatherInterval;
-        let rainChart;
-        let rainProbabilityThreshold = 25;
-        let forecastHours = 12;
-        let is24HourFormat = false;
-        let showConfidenceBounds = false;
-        let showEnsembleMembers = false;
-        let alpha = 0.25;
-        let currentLanguage = 'en';
-        let lastEnsembleData = null;
-        let processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
-
-        // --- Translation Function ---
-        function t(key, replacements = {}) {
-            let text = (translations[currentLanguage] && translations[currentLanguage][key]) || translations['en'][key] || key;
-            for (const placeholder in replacements) {
-                text = text.replace(`{${placeholder}}`, replacements[placeholder]);
-            }
-            return text;
-        }
-
-        function updateUIText() {
-            document.querySelectorAll('[data-translate]').forEach(el => {
-                const key = el.getAttribute('data-translate');
-                el.textContent = t(key);
-            });
-            document.querySelectorAll('[data-translate-placeholder]').forEach(el => {
-                const key = el.getAttribute('data-translate-placeholder');
-                el.placeholder = t(key);
-            });
-             if (rainChart) {
-                rainChart.options.scales.y.title.text = t('chart_y_label');
-                rainChart.options.scales.x.title.text = t('chart_x_label');
-                rainChart.update('none');
-            }
-        }
-
-        // --- Chart Functions ---
-        function initializeChart() {
-            const ctx = chartCanvas.getContext('2d');
-            rainChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: 'Ensemble Avg', data: [], backgroundColor: 'rgba(59, 130, 246, 0.6)', borderColor: 'rgba(59, 130, 246, 1)', borderWidth: 1, order: 2 },
-                        { label: 'GFS', data: [], type: 'line', borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
-                        { label: 'ECMWF', data: [], type: 'line', borderColor: 'rgba(249, 115, 22, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
-                        { label: 'ICON', data: [], type: 'line', borderColor: 'rgba(139, 92, 246, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
-                        { label: 'NWS', data: [], type: 'line', borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
-                        {
-                            label: 'Confidence Bound',
-                            data: [], // Upper bound
-                            fill: '+1',
-                            backgroundColor: 'rgba(156, 163, 175, 0.2)',
-                            borderColor: 'transparent',
-                            pointRadius: 0,
-                            type: 'line',
-                            order: 0
-                        },
-                        {
-                            label: 'Lower Bound',
-                            data: [], // Lower bound
-                            fill: false,
-                            borderColor: 'transparent',
-                            pointRadius: 0,
-                            type: 'line'
-                        }
-                    ]
-                },
-                options: {
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { beginAtZero: true, max: 100, title: { display: true, text: t('chart_y_label') } },
-                        x: { title: { display: true, text: t('chart_x_label') } }
-                    },
-                    plugins: {
-                        legend: {
-                            display: true,
-                            position: 'bottom',
-                            labels: { 
-                                boxWidth: 12, 
-                                font: { size: 10 }
-                            },
-                            onClick: (e, legendItem, legend) => {
-                                const chart = legend.chart;
-                                if (legendItem.text === 'Confidence Bound') {
-                                    showConfidenceBounds = !showConfidenceBounds;
-                                    confidenceToggle.checked = showConfidenceBounds;
-                                    
-                                    const hideBounds = !showConfidenceBounds;
-                                    chart.data.datasets[5].hidden = hideBounds;
-                                    chart.data.datasets[6].hidden = hideBounds;
-                                } else {
-                                    Chart.defaults.plugins.legend.onClick.call(chart, e, legendItem, legend);
-                                }
-                                chart.update();
-                            }
-                        },
-                        annotation: {
-                            annotations: {
-                                thresholdLine: { type: 'line', yMin: rainProbabilityThreshold, yMax: rainProbabilityThreshold, borderColor: 'rgba(239, 68, 68, 0.8)', borderWidth: 2, borderDash: [5, 5] }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function updateChart(labels, ensembleData, modelData, confidenceData, activeModels) {
-            if (!rainChart) initializeChart();
-            
-            rainChart.options.plugins.legend.labels.filter = (item) => {
-                const label = item.text;
-                if (['Ensemble Avg', 'Confidence Bound'].includes(label)) return true;
-                if (label === 'Lower Bound') return false;
-                return activeModels.includes(label.toUpperCase()) && showEnsembleMembers;
-            };
-
-            rainChart.data.datasets.forEach(dataset => {
-                const label = dataset.label;
-                if (['Ensemble Avg', 'Confidence Bound', 'Lower Bound'].includes(label)) return;
-                
-                const isInactive = !activeModels.includes(label.toUpperCase());
-                dataset.hidden = isInactive || !showEnsembleMembers;
-            });
-
-            rainChart.data.labels = labels;
-            rainChart.data.datasets[0].data = ensembleData;
-            rainChart.data.datasets[1].data = modelData.gfs;
-            rainChart.data.datasets[2].data = modelData.ecmwf;
-            rainChart.data.datasets[3].data = modelData.icon;
-            rainChart.data.datasets[4].data = modelData.nws;
-            rainChart.data.datasets[5].data = confidenceData.upper;
-            rainChart.data.datasets[6].data = confidenceData.lower;
-            
-            const hideBounds = !showConfidenceBounds;
-            rainChart.data.datasets[5].hidden = hideBounds;
-            rainChart.data.datasets[6].hidden = hideBounds;
-
-            rainChart.options.plugins.annotation.annotations.thresholdLine.yMin = rainProbabilityThreshold;
-            rainChart.options.plugins.annotation.annotations.thresholdLine.yMax = rainProbabilityThreshold;
-
-            rainChart.update();
-        }
-
-        // --- Notification Functions ---
-        function requestNotificationPermission() {
-            if (!("Notification" in window)) {
-                notificationStatusSpan.textContent = t('not_supported');
-                return;
-            }
-            Notification.requestPermission().then(permission => {
-                notificationStatusSpan.textContent = permission === "granted" ? t('enabled') : t('disabled');
-            });
-        }
-        
-        function sendNotification(title, body) {
-            if (Notification.permission === "granted") {
-                navigator.serviceWorker.ready.then(reg => {
-                    reg.showNotification(title, { body: body, icon: 'icon-192.png' });
+        window.onload = () => {
+            // --- PWA Service Worker Registration ---
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('./sw.js')
+                        .then(reg => console.log('Service Worker registered.'))
+                        .catch(err => console.log('Service Worker registration failed: ', err));
                 });
             }
-        }
 
-        // --- Location Functions ---
-        async function getCoordinatesForLocation(locationName) {
-            setLoadingState(t('finding_location'));
-            const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=${currentLanguage}&format=json`;
-            try {
-                const response = await fetch(geocodeUrl);
-                const data = await response.json();
-                if (data.results && data.results.length > 0) {
-                    const loc = data.results[0];
-                    const displayName = `${loc.name}, ${loc.admin1 || loc.country}`;
-                    saveAndSetLocation(loc.latitude, loc.longitude, displayName);
-                } else {
-                    alert(t('location_not_found'));
-                    loadSavedLocation();
+            // --- PWA Install Prompt ---
+            let deferredPrompt;
+            const installButton = document.getElementById('install-button');
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                installButton.style.display = 'block';
+            });
+            installButton.addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    await deferredPrompt.userChoice;
+                    deferredPrompt = null;
+                    installButton.style.display = 'none';
                 }
-            } catch (error) {
-                alert(t('failed_to_find_location'));
-                loadSavedLocation();
-            }
-        }
+            });
 
-        async function getLocationNameForCoordinates(lat, lon) {
-            setLoadingState(t('getting_location_name'));
-            const reverseGeocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=${currentLanguage}`;
-            try {
-                const response = await fetch(reverseGeocodeUrl);
-                const data = await response.json();
-                const address = data.address;
-                const displayName = address.city || address.town || address.village || 'Current Location';
-                saveAndSetLocation(lat, lon, displayName);
-            } catch (error) {
-                console.error("Reverse geocoding failed:", error);
-                saveAndSetLocation(lat, lon, `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`);
-            }
-        }
-        
-        function handleGpsClick() {
-            if (navigator.geolocation) {
-                setLoadingState(t('getting_gps'));
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        getLocationNameForCoordinates(position.coords.latitude, position.coords.longitude);
+            // --- Configuration ---
+            const REFRESH_INTERVAL = 1200000; // 20 minutes
+            const WEATHER_MODELS = 'gfs_seamless,ecmwf_ifs,icon_seamless';
+
+            // --- DOM Elements ---
+            const weatherInfoDiv = document.getElementById('weather-info');
+            const warningMessageDiv = document.getElementById('warning-message');
+            const lastUpdatedSpan = document.getElementById('last-updated');
+            const notificationStatusSpan = document.getElementById('notification-status');
+            const locationForm = document.getElementById('location-form');
+            const locationInput = document.getElementById('location-input');
+            const locationDisplay = document.getElementById('location-display');
+            const gpsButton = document.getElementById('gps-button');
+            const chartCanvas = document.getElementById('rainChart');
+            const thresholdInput = document.getElementById('threshold-input');
+            const forecastHoursInput = document.getElementById('forecast-hours-input');
+            const timeFormatToggle = document.getElementById('time-format-toggle');
+            const confidenceToggle = document.getElementById('confidence-toggle');
+            const showEnsembleToggle = document.getElementById('show-ensemble-toggle');
+            const showAmountToggle = document.getElementById('show-amount-toggle');
+            const alphaInput = document.getElementById('alpha-input');
+            const unitSystemSelect = document.getElementById('unit-system-select');
+            const dataSourceP = document.getElementById('data-source');
+
+            // --- App State ---
+            let currentLatitude, currentLongitude;
+            let weatherInterval;
+            let rainChart;
+            let rainProbabilityThreshold = 25;
+            let forecastHours = 12;
+            let is24HourFormat = false;
+            let showConfidenceBounds = false;
+            let showEnsembleMembers = false;
+            let showExpectedAmount = false;
+            let unitSystem = 'metric';
+            let alpha = 0.25;
+            let lastEnsembleData = null;
+            let processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
+            let processedPrecipitationData = { gfs: [], ecmwf: [], icon: [] };
+
+            // --- Chart Functions ---
+            function initializeChart() {
+                const ctx = chartCanvas.getContext('2d');
+                rainChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            { label: 'Ensemble Avg', data: [], yAxisID: 'y', backgroundColor: 'rgba(59, 130, 246, 0.6)', borderColor: 'rgba(59, 130, 246, 1)', borderWidth: 1, order: 2 },
+                            { label: 'GFS', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+                            { label: 'ECMWF', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(249, 115, 22, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+                            { label: 'ICON', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(139, 92, 246, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+                            { label: 'NWS', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+                            {
+                                label: 'Confidence Bound',
+                                data: [], // Upper bound
+                                yAxisID: 'y',
+                                fill: '+1',
+                                backgroundColor: 'rgba(156, 163, 175, 0.2)',
+                                borderColor: 'transparent',
+                                pointRadius: 0,
+                                type: 'line',
+                                order: 0
+                            },
+                            {
+                                label: 'Lower Bound',
+                                data: [], // Lower bound
+                                yAxisID: 'y',
+                                fill: false,
+                                borderColor: 'transparent',
+                                pointRadius: 0,
+                                type: 'line'
+                            },
+                            {
+                                label: 'Forecast Amount',
+                                data: [],
+                                yAxisID: 'y1',
+                                backgroundColor: 'rgba(20, 184, 166, 0.6)',
+                                borderColor: 'rgba(13, 148, 136, 1)',
+                                borderWidth: 1,
+                                order: 3
+                            }
+                        ]
                     },
-                    (error) => {
-                        alert(t('gps_error') + error.message);
+                    options: {
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { type: 'linear', position: 'left', beginAtZero: true, max: 100, title: { display: true, text: 'Rain Probability (%)' } },
+                            y1: { type: 'linear', position: 'right', beginAtZero: true, title: { display: true, text: 'Forecast Amount (mm)' }, grid: { drawOnChartArea: false } },
+                            x: { title: { display: true, text: 'Time' } }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'bottom',
+                                labels: { 
+                                    boxWidth: 12, 
+                                    font: { size: 10 }
+                                },
+                                onClick: (e, legendItem, legend) => {
+                                    const chart = legend.chart;
+                                    if (legendItem.text === 'Confidence Bound') {
+                                        showConfidenceBounds = !showConfidenceBounds;
+                                        confidenceToggle.checked = showConfidenceBounds;
+                                        
+                                        const hideBounds = !showConfidenceBounds;
+                                        chart.data.datasets[5].hidden = hideBounds;
+                                        chart.data.datasets[6].hidden = hideBounds;
+                                    } else {
+                                        Chart.defaults.plugins.legend.onClick.call(chart, e, legendItem, legend);
+                                    }
+                                    chart.update();
+                                }
+                            },
+                            annotation: {
+                                annotations: {
+                                    thresholdLine: { type: 'line', yMin: rainProbabilityThreshold, yMax: rainProbabilityThreshold, borderColor: '#F59E0B', borderWidth: 2, borderDash: [6, 6], scaleID: 'y' }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            function updateChart(labels, ensembleData, modelData, confidenceData, forecastAmountData, activeModels) {
+                if (!rainChart) initializeChart();
+                
+                rainChart.options.plugins.legend.labels.filter = (item) => {
+                    const label = item.text;
+                    if (['Ensemble Avg', 'Confidence Bound', 'Forecast Amount'].includes(label)) return true;
+                    if (label === 'Lower Bound') return false;
+                    return activeModels.includes(label.toUpperCase()) && showEnsembleMembers;
+                };
+
+                rainChart.data.datasets.forEach(dataset => {
+                    const label = dataset.label;
+                    if (['Ensemble Avg', 'Confidence Bound', 'Lower Bound', 'Forecast Amount'].includes(label)) return;
+                    
+                    const isInactive = !activeModels.includes(label.toUpperCase());
+                    dataset.hidden = isInactive || !showEnsembleMembers;
+                });
+
+                rainChart.data.labels = labels;
+                rainChart.data.datasets[0].data = ensembleData;
+                rainChart.data.datasets[1].data = modelData.gfs;
+                rainChart.data.datasets[2].data = modelData.ecmwf;
+                rainChart.data.datasets[3].data = modelData.icon;
+                rainChart.data.datasets[4].data = modelData.nws;
+                rainChart.data.datasets[5].data = confidenceData.upper;
+                rainChart.data.datasets[6].data = confidenceData.lower;
+                rainChart.data.datasets[7].data = forecastAmountData;
+                
+                rainChart.data.datasets[5].hidden = !showConfidenceBounds;
+                rainChart.data.datasets[6].hidden = !showConfidenceBounds;
+                rainChart.data.datasets[7].hidden = !showExpectedAmount;
+
+                rainChart.options.plugins.annotation.annotations.thresholdLine.yMin = rainProbabilityThreshold;
+                rainChart.options.plugins.annotation.annotations.thresholdLine.yMax = rainProbabilityThreshold;
+                
+                const y2Label = unitSystem === 'imperial' ? 'Forecast Amount (in)' : 'Forecast Amount (mm)';
+                rainChart.options.scales.y1.title.text = y2Label;
+
+                rainChart.update();
+            }
+
+            // --- Notification Functions ---
+            function requestNotificationPermission() {
+                if (!("Notification" in window)) {
+                    notificationStatusSpan.textContent = 'Not Supported';
+                    return;
+                }
+                Notification.requestPermission().then(permission => {
+                    notificationStatusSpan.textContent = permission === "granted" ? 'Enabled' : 'Disabled';
+                });
+            }
+            
+            function sendNotification(title, body) {
+                if (Notification.permission === "granted") {
+                    navigator.serviceWorker.ready.then(reg => {
+                        reg.showNotification(title, { body: body, icon: 'icon-192.png' });
+                    });
+                }
+            }
+
+            // --- Location Functions ---
+            async function getCoordinatesForLocation(locationName) {
+                setLoadingState('Finding location...');
+                const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
+                try {
+                    const response = await fetch(geocodeUrl);
+                    const data = await response.json();
+                    if (data.results && data.results.length > 0) {
+                        const loc = data.results[0];
+                        const displayName = `${loc.name}, ${loc.admin1 || loc.country}`;
+                        saveAndSetLocation(loc.latitude, loc.longitude, displayName);
+                    } else {
+                        alert('Location not found.');
                         loadSavedLocation();
                     }
-                );
-            } else {
-                alert("Geolocation is not supported by this browser.");
-            }
-        }
-
-        function saveAndSetLocation(lat, lon, name) {
-            localStorage.setItem('weatherLocation', JSON.stringify({ latitude: lat, longitude: lon, name: name }));
-            updateLocation(lat, lon, name);
-        }
-
-        function updateLocation(lat, lon, name) {
-            currentLatitude = lat;
-            currentLongitude = lon;
-            locationDisplay.textContent = name;
-            
-            if (weatherInterval) clearInterval(weatherInterval);
-            getEnsembleWeatherData();
-            weatherInterval = setInterval(getEnsembleWeatherData, REFRESH_INTERVAL);
-        }
-
-        function loadSavedLocation() {
-            const savedLocation = localStorage.getItem('weatherLocation');
-            if (savedLocation) {
-                const { latitude, longitude, name } = JSON.parse(savedLocation);
-                updateLocation(latitude, longitude, name);
-            } else {
-                updateLocation(49.2827, -123.1207, 'Vancouver, BC'); 
-            }
-        }
-
-        // --- Weather Data Functions ---
-        async function getNWSForecast(lat, lon) {
-            try {
-                const pointsResponse = await fetch(`https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`);
-                if (!pointsResponse.ok) return null;
-                const pointsData = await pointsResponse.json();
-                const hourlyUrl = pointsData.properties.forecastHourly;
-                if (!hourlyUrl) return null;
-
-                const hourlyResponse = await fetch(hourlyUrl);
-                if (!hourlyResponse.ok) return null;
-                const hourlyData = await hourlyResponse.json();
-                
-                return hourlyData.properties.periods.map(period => ({
-                    time: new Date(period.startTime),
-                    probability: period.probabilityOfPrecipitation.value || 0
-                }));
-            } catch (error) {
-                console.error("NWS fetch failed:", error);
-                return null;
-            }
-        }
-
-        async function getEnsembleWeatherData() {
-            if (currentLatitude === undefined || currentLongitude === undefined) return;
-            setLoadingState(t('fetching_forecast'));
-
-            const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLatitude}&longitude=${currentLongitude}&hourly=precipitation_probability&models=${WEATHER_MODELS}&forecast_days=2`;
-            
-            const [openMeteoResult, nwsResult] = await Promise.allSettled([
-                fetch(openMeteoUrl).then(res => res.json()),
-                getNWSForecast(currentLatitude, currentLongitude)
-            ]);
-
-            if (openMeteoResult.status === 'rejected') {
-                handleFetchError(t('fetch_error'));
-                return;
-            }
-
-            lastEnsembleData = {
-                openMeteo: openMeteoResult.value,
-                nws: nwsResult.status === 'fulfilled' ? nwsResult.value : null
-            };
-
-            if (lastEnsembleData.openMeteo.error) {
-                handleFetchError(t('api_error', { reason: lastEnsembleData.openMeteo.reason }));
-                return;
-            }
-            
-            processEnsembleData(lastEnsembleData);
-        }
-
-        function getQuantile(sortedArray, q) {
-            const pos = (sortedArray.length - 1) * q;
-            const base = Math.floor(pos);
-            const rest = pos - base;
-            if (sortedArray[base + 1] !== undefined) {
-                return sortedArray[base] + rest * (sortedArray[base + 1] - sortedArray[base]);
-            } else {
-                return sortedArray[base];
-            }
-        }
-
-        function processEnsembleData(data) {
-            if (!data || !data.openMeteo || !data.openMeteo.hourly || !data.openMeteo.hourly.time) {
-                handleFetchError(t('invalid_data'));
-                return;
-            }
-            weatherInfoDiv.style.display = 'none';
-            
-            const now = new Date();
-            let rainChanceFound = false;
-            
-            const chartLabels = [];
-            processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
-            const activeModels = [];
-            const ensembleAverageData = [];
-            const confidenceData = { upper: [], lower: [] };
-            
-            const hourly = data.openMeteo.hourly;
-            const timeData = hourly.time;
-            
-            const gfsProbs = hourly.precipitation_probability_gfs_seamless;
-            const ecmwfProbs = hourly.precipitation_probability_ecmwf_ifs;
-            const iconProbs = hourly.precipitation_probability_icon_seamless;
-
-            let startIndex = timeData.findLastIndex(timeStr => new Date(timeStr + 'Z') <= now);
-
-            if (startIndex === -1) {
-                startIndex = 0;
-            }
-
-            if (gfsProbs && gfsProbs.some(p => p !== null)) activeModels.push('GFS');
-            if (ecmwfProbs && ecmwfProbs.some(p => p !== null)) activeModels.push('ECMWF');
-            if (iconProbs && iconProbs.some(p => p !== null)) activeModels.push('ICON');
-            if (data.nws && data.nws.some(p => p.probability !== null)) activeModels.push('NWS');
-            dataSourceP.innerHTML = `${t('data_sources')}: ${activeModels.join(', ') || 'None'}`;
-
-            for (let i = 0; i < forecastHours; i++) {
-                const dataIndex = startIndex + i;
-                if (dataIndex >= timeData.length) continue;
-
-                const forecastTime = new Date(timeData[dataIndex] + 'Z');
-                chartLabels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
-                
-                const probabilities = [];
-                const gfsProb = gfsProbs && gfsProbs[dataIndex] != null ? gfsProbs[dataIndex] : NaN;
-                processedModelData.gfs[i] = gfsProb;
-                if (activeModels.includes('GFS') && !isNaN(gfsProb)) probabilities.push(gfsProb);
-
-                const ecmwfProb = ecmwfProbs && ecmwfProbs[dataIndex] != null ? ecmwfProbs[dataIndex] : NaN;
-                processedModelData.ecmwf[i] = ecmwfProb;
-                if (activeModels.includes('ECMWF') && !isNaN(ecmwfProb)) probabilities.push(ecmwfProb);
-
-                const iconProb = iconProbs && iconProbs[dataIndex] != null ? iconProbs[dataIndex] : NaN;
-                processedModelData.icon[i] = iconProb;
-                if (activeModels.includes('ICON') && !isNaN(iconProb)) probabilities.push(iconProb);
-
-                let nwsProb = NaN;
-                if (data.nws) {
-                    const nwsPoint = data.nws.find(p => p.time.getTime() === forecastTime.getTime());
-                    if (nwsPoint && nwsPoint.probability !== null) nwsProb = nwsPoint.probability;
+                } catch (error) {
+                    alert('Failed to find location.');
+                    loadSavedLocation();
                 }
-                processedModelData.nws[i] = nwsProb;
-                if (activeModels.includes('NWS') && !isNaN(nwsProb)) probabilities.push(nwsProb);
-                
-                const sum = probabilities.reduce((a, b) => a + b, 0);
-                const average = probabilities.length > 0 ? sum / probabilities.length : 0;
-                ensembleAverageData.push(average);
+            }
 
-                if (probabilities.length > 1) {
-                    probabilities.sort((a, b) => a - b);
-                    confidenceData.lower.push(getQuantile(probabilities, alpha));
-                    confidenceData.upper.push(getQuantile(probabilities, 1 - alpha));
-                } else if (probabilities.length === 1) {
-                    confidenceData.lower.push(probabilities[0]);
-                    confidenceData.upper.push(probabilities[0]);
+            async function getLocationNameForCoordinates(lat, lon) {
+                setLoadingState('Getting location name...');
+                const reverseGeocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=en`;
+                try {
+                    const response = await fetch(reverseGeocodeUrl);
+                    const data = await response.json();
+                    const address = data.address;
+                    const displayName = address.city || address.town || address.village || 'Current Location';
+                    saveAndSetLocation(lat, lon, displayName);
+                } catch (error) {
+                    console.error("Reverse geocoding failed:", error);
+                    saveAndSetLocation(lat, lon, `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`);
+                }
+            }
+            
+            function handleGpsClick() {
+                if (navigator.geolocation) {
+                    setLoadingState('Getting GPS signal...');
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            getLocationNameForCoordinates(position.coords.latitude, position.coords.longitude);
+                        },
+                        (error) => {
+                            alert('GPS Error: ' + error.message);
+                            loadSavedLocation();
+                        }
+                    );
                 } else {
-                    confidenceData.lower.push(0);
-                    confidenceData.upper.push(0);
-                }
-
-                if (!rainChanceFound && average >= rainProbabilityThreshold) {
-                    displayWarning(Math.round(average), forecastTime);
-                    rainChanceFound = true;
+                    alert("Geolocation is not supported by this browser.");
                 }
             }
-            
-            if (!rainChanceFound) {
-                displaySafeMessage();
+
+            function saveAndSetLocation(lat, lon, name) {
+                localStorage.setItem('weatherLocation', JSON.stringify({ latitude: lat, longitude: lon, name: name }));
+                updateLocation(lat, lon, name);
             }
-            updateChart(chartLabels, ensembleAverageData, processedModelData, confidenceData, activeModels);
-            lastUpdatedSpan.textContent = now.toLocaleTimeString([], { hour12: !is24HourFormat });
-        }
 
-        // --- UI Helper Functions ---
-        function setLoadingState(message) {
-            weatherInfoDiv.style.display = 'block';
-            weatherInfoDiv.innerHTML = `<div class="loader"></div><p class="text-gray-600">${message}</p>`;
-            warningMessageDiv.style.display = 'none';
-        }
+            function updateLocation(lat, lon, name) {
+                currentLatitude = lat;
+                currentLongitude = lon;
+                locationDisplay.textContent = name;
+                
+                if (weatherInterval) clearInterval(weatherInterval);
+                getEnsembleWeatherData();
+                weatherInterval = setInterval(getEnsembleWeatherData, REFRESH_INTERVAL);
+            }
 
-        function handleFetchError(message) {
-            weatherInfoDiv.style.display = 'none';
-            warningMessageDiv.textContent = message;
-            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
-            warningMessageDiv.style.display = 'block';
-        }
+            function loadSavedLocation() {
+                const savedLocation = localStorage.getItem('weatherLocation');
+                if (savedLocation) {
+                    const { latitude, longitude, name } = JSON.parse(savedLocation);
+                    updateLocation(latitude, longitude, name);
+                } else {
+                    updateLocation(49.2827, -123.1207, 'Vancouver, BC'); 
+                }
+            }
 
-        function displayWarning(probability, time) {
-            const message = t('warning_message', { probability, time: time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !is24HourFormat }) });
-            warningMessageDiv.innerHTML = `<strong>${message}</strong>`;
-            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
-            warningMessageDiv.style.display = 'block';
-            sendNotification(t('title'), message);
-        }
+            // --- Weather Data Functions ---
+            async function getNWSForecast(lat, lon) {
+                try {
+                    const pointsResponse = await fetch(`https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`);
+                    if (!pointsResponse.ok) return null;
+                    const pointsData = await pointsResponse.json();
+                    const hourlyUrl = pointsData.properties.forecastHourly;
+                    if (!hourlyUrl) return null;
 
-        function displaySafeMessage() {
-            warningMessageDiv.textContent = t('safe_message', { threshold: rainProbabilityThreshold, hours: forecastHours });
-            warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium safe';
-            warningMessageDiv.style.display = 'block';
-        }
+                    const hourlyResponse = await fetch(hourlyUrl);
+                    if (!hourlyResponse.ok) return null;
+                    const hourlyData = await hourlyResponse.json();
+                    
+                    return hourlyData.properties.periods.map(period => ({
+                        time: new Date(period.startTime),
+                        probability: period.probabilityOfPrecipitation.value || 0
+                    }));
+                } catch (error) {
+                    console.error("NWS fetch failed:", error);
+                    return null;
+                }
+            }
 
-        // --- Settings Functions ---
-        function loadSavedSettings() {
-            const savedThreshold = localStorage.getItem('rainWarningThreshold');
-            if (savedThreshold) rainProbabilityThreshold = parseInt(savedThreshold, 10);
-            thresholdInput.value = rainProbabilityThreshold;
+            async function getEnsembleWeatherData() {
+                if (currentLatitude === undefined || currentLongitude === undefined) return;
+                setLoadingState('Fetching ensemble forecast...');
 
-            const savedHours = localStorage.getItem('forecastHours');
-            if (savedHours) forecastHours = parseInt(savedHours, 10);
-            forecastHoursInput.value = forecastHours;
+                const precipUnit = unitSystem === 'imperial' ? 'inch' : 'mm';
+                const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLatitude}&longitude=${currentLongitude}&hourly=precipitation_probability,precipitation&models=${WEATHER_MODELS}&precipitation_unit=${precipUnit}&forecast_days=2`;
+                
+                const [openMeteoResult, nwsResult] = await Promise.allSettled([
+                    fetch(openMeteoUrl).then(res => res.json()),
+                    getNWSForecast(currentLatitude, currentLongitude)
+                ]);
 
-            is24HourFormat = localStorage.getItem('is24HourFormat') === 'true';
-            timeFormatToggle.checked = is24HourFormat;
+                if (openMeteoResult.status === 'rejected') {
+                    handleFetchError('Could not retrieve weather data.');
+                    return;
+                }
 
-            showConfidenceBounds = localStorage.getItem('showConfidenceBounds') === 'true';
-            confidenceToggle.checked = showConfidenceBounds;
+                lastEnsembleData = {
+                    openMeteo: openMeteoResult.value,
+                    nws: nwsResult.status === 'fulfilled' ? nwsResult.value : null
+                };
 
-            showEnsembleMembers = localStorage.getItem('showEnsembleMembers') === 'true';
-            showEnsembleToggle.checked = showEnsembleMembers;
+                if (lastEnsembleData.openMeteo.error) {
+                    handleFetchError(`API Error: ${lastEnsembleData.openMeteo.reason}`);
+                    return;
+                }
+                
+                processEnsembleData(lastEnsembleData);
+            }
 
-            const savedAlpha = localStorage.getItem('quantileAlpha');
-            if (savedAlpha) alpha = parseFloat(savedAlpha);
-            alphaInput.value = alpha;
-            
-            const savedLang = localStorage.getItem('weatherAppLanguage') || 'en';
-            setLanguage(savedLang);
-        }
+            function getQuantile(sortedArray, q) {
+                const pos = (sortedArray.length - 1) * q;
+                const base = Math.floor(pos);
+                const rest = pos - base;
+                if (sortedArray[base + 1] !== undefined) {
+                    return sortedArray[base] + rest * (sortedArray[base + 1] - sortedArray[base]);
+                } else {
+                    return sortedArray[base];
+                }
+            }
 
-        function handleThresholdChange() {
-            const newThreshold = parseInt(thresholdInput.value, 10);
-            if (!isNaN(newThreshold) && newThreshold >= 0 && newThreshold <= 100) {
-                rainProbabilityThreshold = newThreshold;
-                localStorage.setItem('rainWarningThreshold', newThreshold);
+            function processEnsembleData(data) {
+                if (!data || !data.openMeteo || !data.openMeteo.hourly || !data.openMeteo.hourly.time) {
+                    handleFetchError('Invalid data format from API.');
+                    return;
+                }
+                weatherInfoDiv.style.display = 'none';
+                
+                const now = new Date();
+                let rainChanceFound = false;
+                
+                const chartLabels = [];
+                processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
+                processedPrecipitationData = { gfs: [], ecmwf: [], icon: [] };
+                const activeModels = [];
+                const ensembleAverageData = [];
+                const forecastAmountData = [];
+                const confidenceData = { upper: [], lower: [] };
+                
+                const hourly = data.openMeteo.hourly;
+                const timeData = hourly.time;
+                
+                const gfsProbs = hourly.precipitation_probability_gfs_seamless;
+                const ecmwfProbs = hourly.precipitation_probability_ecmwf_ifs;
+                const iconProbs = hourly.precipitation_probability_icon_seamless;
+
+                const gfsPrecip = hourly.precipitation_gfs_seamless;
+                const ecmwfPrecip = hourly.precipitation_ecmwf_ifs;
+                const iconPrecip = hourly.precipitation_icon_seamless;
+
+                let startIndex = timeData.findLastIndex(timeStr => new Date(timeStr + 'Z') <= now);
+
+                if (startIndex === -1) {
+                    startIndex = 0;
+                }
+
+                if (gfsProbs && gfsProbs.some(p => p !== null)) activeModels.push('GFS');
+                if (ecmwfProbs && ecmwfProbs.some(p => p !== null)) activeModels.push('ECMWF');
+                if (iconProbs && iconProbs.some(p => p !== null)) activeModels.push('ICON');
+                if (data.nws && data.nws.some(p => p.probability !== null)) activeModels.push('NWS');
+                dataSourceP.innerHTML = `Data Sources: ${activeModels.join(', ') || 'None'}`;
+
+                for (let i = 0; i < forecastHours; i++) {
+                    const dataIndex = startIndex + i;
+                    if (dataIndex >= timeData.length) continue;
+
+                    const forecastTime = new Date(timeData[dataIndex] + 'Z');
+                    chartLabels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
+                    
+                    const probabilities = [];
+                    const precipitations = [];
+
+                    const gfsProb = gfsProbs && gfsProbs[dataIndex] != null ? gfsProbs[dataIndex] : NaN;
+                    processedModelData.gfs[i] = gfsProb;
+                    if (activeModels.includes('GFS') && !isNaN(gfsProb)) probabilities.push(gfsProb);
+                    
+                    const gfsPrecipVal = gfsPrecip && gfsPrecip[dataIndex] != null ? gfsPrecip[dataIndex] : NaN;
+                    if (activeModels.includes('GFS') && !isNaN(gfsPrecipVal)) precipitations.push(gfsPrecipVal);
+
+                    const ecmwfProb = ecmwfProbs && ecmwfProbs[dataIndex] != null ? ecmwfProbs[dataIndex] : NaN;
+                    processedModelData.ecmwf[i] = ecmwfProb;
+                    if (activeModels.includes('ECMWF') && !isNaN(ecmwfProb)) probabilities.push(ecmwfProb);
+
+                    const ecmwfPrecipVal = ecmwfPrecip && ecmwfPrecip[dataIndex] != null ? ecmwfPrecip[dataIndex] : NaN;
+                    if (activeModels.includes('ECMWF') && !isNaN(ecmwfPrecipVal)) precipitations.push(ecmwfPrecipVal);
+
+                    const iconProb = iconProbs && iconProbs[dataIndex] != null ? iconProbs[dataIndex] : NaN;
+                    processedModelData.icon[i] = iconProb;
+                    if (activeModels.includes('ICON') && !isNaN(iconProb)) probabilities.push(iconProb);
+
+                    const iconPrecipVal = iconPrecip && iconPrecip[dataIndex] != null ? iconPrecip[dataIndex] : NaN;
+                    if (activeModels.includes('ICON') && !isNaN(iconPrecipVal)) precipitations.push(iconPrecipVal);
+
+                    let nwsProb = NaN;
+                    if (data.nws) {
+                        const nwsPoint = data.nws.find(p => p.time.getTime() === forecastTime.getTime());
+                        if (nwsPoint && nwsPoint.probability !== null) nwsProb = nwsPoint.probability;
+                    }
+                    processedModelData.nws[i] = nwsProb;
+                    if (activeModels.includes('NWS') && !isNaN(nwsProb)) probabilities.push(nwsProb);
+                    
+                    const probSum = probabilities.reduce((a, b) => a + b, 0);
+                    const probAverage = probabilities.length > 0 ? probSum / probabilities.length : 0;
+                    ensembleAverageData.push(probAverage);
+
+                    const precipSum = precipitations.reduce((a, b) => a + b, 0);
+                    const precipAverage = precipitations.length > 0 ? precipSum / precipitations.length : 0;
+                    
+                    forecastAmountData.push(precipAverage);
+
+                    if (probabilities.length > 1) {
+                        probabilities.sort((a, b) => a - b);
+                        confidenceData.lower.push(getQuantile(probabilities, alpha));
+                        confidenceData.upper.push(getQuantile(probabilities, 1 - alpha));
+                    } else if (probabilities.length === 1) {
+                        confidenceData.lower.push(probabilities[0]);
+                        confidenceData.upper.push(probabilities[0]);
+                    } else {
+                        confidenceData.lower.push(0);
+                        confidenceData.upper.push(0);
+                    }
+
+                    if (!rainChanceFound && probAverage >= rainProbabilityThreshold) {
+                        displayWarning(Math.round(probAverage), forecastTime);
+                        rainChanceFound = true;
+                    }
+                }
+                
+                if (!rainChanceFound) {
+                    displaySafeMessage();
+                }
+                updateChart(chartLabels, ensembleAverageData, processedModelData, confidenceData, forecastAmountData, activeModels);
+                lastUpdatedSpan.textContent = now.toLocaleTimeString([], { hour12: !is24HourFormat });
+            }
+
+            // --- UI Helper Functions ---
+            function setLoadingState(message) {
+                weatherInfoDiv.style.display = 'block';
+                weatherInfoDiv.innerHTML = `<div class="loader"></div><p class="text-gray-600">${message}</p>`;
+                warningMessageDiv.style.display = 'none';
+            }
+
+            function handleFetchError(message) {
+                weatherInfoDiv.style.display = 'none';
+                warningMessageDiv.textContent = message;
+                warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
+                warningMessageDiv.style.display = 'block';
+            }
+
+            function displayWarning(probability, time) {
+                const message = `Warning! There is a ${probability}% chance of rain around ${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !is24HourFormat })}.`;
+                warningMessageDiv.innerHTML = `<strong>${message}</strong>`;
+                warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium warning';
+                warningMessageDiv.style.display = 'block';
+                sendNotification('Rain Warning', message);
+            }
+
+            function displaySafeMessage() {
+                warningMessageDiv.textContent = `No significant chance of rain (≥ ${rainProbabilityThreshold}%) in the next ${forecastHours} hours.`;
+                warningMessageDiv.className = 'mt-4 p-4 rounded-lg text-center font-medium safe';
+                warningMessageDiv.style.display = 'block';
+            }
+
+            // --- Settings Functions ---
+            function loadSavedSettings() {
+                const savedThreshold = localStorage.getItem('rainWarningThreshold');
+                if (savedThreshold) rainProbabilityThreshold = parseInt(savedThreshold, 10);
+                thresholdInput.value = rainProbabilityThreshold;
+
+                const savedHours = localStorage.getItem('forecastHours');
+                if (savedHours) forecastHours = parseInt(savedHours, 10);
+                forecastHoursInput.value = forecastHours;
+
+                is24HourFormat = localStorage.getItem('is24HourFormat') === 'true';
+                timeFormatToggle.checked = is24HourFormat;
+
+                showConfidenceBounds = localStorage.getItem('showConfidenceBounds') === 'true';
+                confidenceToggle.checked = showConfidenceBounds;
+
+                showEnsembleMembers = localStorage.getItem('showEnsembleMembers') === 'true';
+                showEnsembleToggle.checked = showEnsembleMembers;
+
+                showExpectedAmount = localStorage.getItem('showExpectedAmount') === 'true';
+                showAmountToggle.checked = showExpectedAmount;
+
+                const savedAlpha = localStorage.getItem('quantileAlpha');
+                if (savedAlpha) alpha = parseFloat(savedAlpha);
+                alphaInput.value = alpha;
+                
+                const savedUnitSystem = localStorage.getItem('unitSystem') || 'metric';
+                setUnitSystem(savedUnitSystem);
+            }
+
+            function handleThresholdChange() {
+                const newThreshold = parseInt(thresholdInput.value, 10);
+                if (!isNaN(newThreshold) && newThreshold >= 0 && newThreshold <= 100) {
+                    rainProbabilityThreshold = newThreshold;
+                    localStorage.setItem('rainWarningThreshold', newThreshold);
+                    if(lastEnsembleData) processEnsembleData(lastEnsembleData);
+                }
+            }
+
+            function handleForecastHoursChange() {
+                const newHours = parseInt(forecastHoursInput.value, 10);
+                if (!isNaN(newHours) && newHours >= 1 && newHours <= 24) {
+                    forecastHours = newHours;
+                    localStorage.setItem('forecastHours', newHours);
+                    if(lastEnsembleData) processEnsembleData(lastEnsembleData);
+                }
+            }
+
+            function handleTimeFormatChange() {
+                is24HourFormat = timeFormatToggle.checked;
+                localStorage.setItem('is24HourFormat', is24HourFormat);
                 if(lastEnsembleData) processEnsembleData(lastEnsembleData);
             }
-        }
 
-        function handleForecastHoursChange() {
-            const newHours = parseInt(forecastHoursInput.value, 10);
-            if (!isNaN(newHours) && newHours >= 1 && newHours <= 24) {
-                forecastHours = newHours;
-                localStorage.setItem('forecastHours', newHours);
+            function handleConfidenceToggle() {
+                showConfidenceBounds = confidenceToggle.checked;
+                localStorage.setItem('showConfidenceBounds', showConfidenceBounds);
+                if (rainChart) {
+                    const hideBounds = !showConfidenceBounds;
+                    rainChart.data.datasets[5].hidden = hideBounds;
+                    rainChart.data.datasets[6].hidden = hideBounds;
+                    rainChart.update('none');
+                }
+            }
+            
+            function handleShowEnsembleMembersChange() {
+                showEnsembleMembers = showEnsembleToggle.checked;
+                localStorage.setItem('showEnsembleMembers', showEnsembleMembers);
                 if(lastEnsembleData) processEnsembleData(lastEnsembleData);
             }
-        }
 
-        function handleTimeFormatChange() {
-            is24HourFormat = timeFormatToggle.checked;
-            localStorage.setItem('is24HourFormat', is24HourFormat);
-            if(lastEnsembleData) processEnsembleData(lastEnsembleData);
-        }
-
-        function handleConfidenceToggle() {
-            showConfidenceBounds = confidenceToggle.checked;
-            localStorage.setItem('showConfidenceBounds', showConfidenceBounds);
-            if (rainChart) {
-                const hideBounds = !showConfidenceBounds;
-                rainChart.data.datasets[5].hidden = hideBounds;
-                rainChart.data.datasets[6].hidden = hideBounds;
-                rainChart.update('none');
+            function handleShowAmountChange() {
+                showExpectedAmount = showAmountToggle.checked;
+                localStorage.setItem('showExpectedAmount', showExpectedAmount);
+                if (rainChart) {
+                    rainChart.data.datasets[7].hidden = !showExpectedAmount;
+                    rainChart.update('none');
+                }
             }
-        }
-        
-        function handleShowEnsembleMembersChange() {
-            showEnsembleMembers = showEnsembleToggle.checked;
-            localStorage.setItem('showEnsembleMembers', showEnsembleMembers);
-            if(lastEnsembleData) processEnsembleData(lastEnsembleData);
-        }
 
-        function handleAlphaChange() {
-            const newAlpha = parseFloat(alphaInput.value);
-            if (!isNaN(newAlpha) && newAlpha >= 0.01 && newAlpha <= 0.5) {
-                alpha = newAlpha;
-                localStorage.setItem('quantileAlpha', newAlpha);
-                if (lastEnsembleData) processEnsembleData(lastEnsembleData);
+            function handleAlphaChange() {
+                const newAlpha = parseFloat(alphaInput.value);
+                if (!isNaN(newAlpha) && newAlpha >= 0.01 && newAlpha <= 0.5) {
+                    alpha = newAlpha;
+                    localStorage.setItem('quantileAlpha', newAlpha);
+                    if (lastEnsembleData) processEnsembleData(lastEnsembleData);
+                }
             }
-        }
-        
-        function setLanguage(lang) {
-            currentLanguage = lang;
-            localStorage.setItem('weatherAppLanguage', lang);
-            languageSelect.value = lang;
-            document.documentElement.lang = lang;
-            updateUIText();
             
-            if(currentLatitude !== undefined && currentLongitude !== undefined) {
-                getLocationNameForCoordinates(currentLatitude, currentLongitude);
+            function setUnitSystem(system) {
+                unitSystem = system;
+                localStorage.setItem('unitSystem', system);
+                unitSystemSelect.value = system;
+                if (currentLatitude !== undefined && currentLongitude !== undefined) {
+                    getEnsembleWeatherData();
+                }
             }
-        }
 
-        // --- Initial Load and Event Listeners ---
-        document.addEventListener('DOMContentLoaded', () => {
+            // --- Initial Load and Event Listeners ---
             locationForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const locationName = locationInput.value.trim();
@@ -908,14 +742,14 @@
             timeFormatToggle.addEventListener('change', handleTimeFormatChange);
             confidenceToggle.addEventListener('change', handleConfidenceToggle);
             showEnsembleToggle.addEventListener('change', handleShowEnsembleMembersChange);
+            showAmountToggle.addEventListener('change', handleShowAmountChange);
             alphaInput.addEventListener('change', handleAlphaChange);
-            languageSelect.addEventListener('change', (e) => setLanguage(e.target.value));
             
             initializeChart();
             loadSavedSettings();
             requestNotificationPermission();
             loadSavedLocation();
-        });
+        };
     </script>
 </body>
 </html>
