@@ -4,11 +4,13 @@ const CACHE_NAME = 'rain-warning-cache-v5';
 const urlsToCache = [
   '/',
   '/index.html',
-  'https://cdn.tailwindcss.com',
+  '/style.css',
+  '/app.js',
   'https://cdn.jsdelivr.net/npm/chart.js',
   'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap',
-  'https://raw.githubusercontent.com/mpd37/rain-app.github.io/main/icon.svg'
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 // Install event: opens a cache and adds the core files to it.
@@ -53,8 +55,7 @@ self.addEventListener('fetch', event => {
             }
         );
       })
-    )
-  );
+    );
 });
 
 // Activate event: removes old caches.
