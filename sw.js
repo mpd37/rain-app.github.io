@@ -1,16 +1,16 @@
 // A simple caching service worker
 
-const CACHE_NAME = 'rain-warning-cache-v6';
+const CACHE_NAME = 'rain-warning-cache-v7';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
+  './',
+  'index.html',
+  'style.css',
+  'app.js',
   'https://cdn.jsdelivr.net/npm/chart.js',
   'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap',
-  '/icon-192.png',
-  '/icon-512.png'
+  'icon-192.png',
+  'icon-512.png'
 ];
 
 // Install event: opens a cache and adds the core files to it.
