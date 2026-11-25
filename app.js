@@ -8,6 +8,7 @@
 
 const CONFIG = {
     refreshIntervalMs: 20 * 60 * 1000,
+    searchDebounceMs: 240,
     openMeteoModels: [
         { id: 'gfs', apiKey: 'gfs_seamless' },
         { id: 'ecmwf', apiKey: 'ecmwf_ifs' },
@@ -39,11 +40,11 @@ const CONFIG = {
 };
 
 const MODEL_CONFIGS = [
-    { id: 'gfs', label: 'GFS', color: 'rgba(16, 185, 129, 0.75)' },
-    { id: 'ecmwf', label: 'ECMWF', color: 'rgba(249, 115, 22, 0.75)' },
-    { id: 'icon', label: 'ICON', color: 'rgba(139, 92, 246, 0.75)' },
-    { id: 'weathernext3', label: 'WeatherNext 3', color: 'rgba(232, 121, 249, 0.85)' },
-    { id: 'nws', label: 'NWS', color: 'rgba(244, 63, 94, 0.75)' },
+    { id: 'gfs', label: 'GFS', color: 'rgba(74, 222, 128, 0.9)', width: 1.75 },
+    { id: 'ecmwf', label: 'ECMWF', color: 'rgba(251, 191, 36, 0.9)', width: 1.75 },
+    { id: 'icon', label: 'ICON', color: 'rgba(147, 197, 253, 0.9)', width: 1.75 },
+    { id: 'weathernext3', label: 'WeatherNext 3', color: 'rgba(34, 211, 238, 1)', width: 2.25 },
+    { id: 'nws', label: 'NWS', color: 'rgba(251, 113, 133, 0.9)', width: 1.75 },
 ];
 
 const STORAGE_KEYS = {
@@ -64,6 +65,12 @@ const DATASET_IDS = {
     confidenceLower: 'confidence-lower',
     forecastAmount: 'forecast-amount',
     modelPrefix: 'model-',
+};
+
+const STATUS_ICONS = {
+    warning: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M16 14v6"></path><path d="M8 14v6"></path><path d="M12 16v6"></path></svg>',
+    safe: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>',
+    error: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
 };
 
 // --- Pure Math & Parsing Helpers ---
@@ -247,6 +254,10 @@ function buildForecastSeries(modelMaps, options) {
     const forecastAmount = [];
     const confidence = { upper: [], lower: [] };
     let firstWarning = null;
+    let peak = { probability: -1, time: new Date(startUtcMs) };
+    let totalAmount = 0;
+    let spreadSum = 0;
+    let spreadCount = 0;
 
     for (let i = 0; i < timestamps.length; i++) {
         const ts = timestamps[i];
@@ -268,15 +279,25 @@ function buildForecastSeries(modelMaps, options) {
             : 0;
         ensembleAverage.push(probAvg);
 
+        if (probAvg > peak.probability) {
+            peak = { probability: Math.round(probAvg), time: forecastTime };
+        }
+
         const precipAvgMm = precipitationsMm.length > 0
             ? precipitationsMm.reduce((sum, val) => sum + val, 0) / precipitationsMm.length
             : 0;
-        forecastAmount.push(unitSystem === 'imperial' ? precipAvgMm / CONFIG.mmPerInch : precipAvgMm);
+        const precipDisplay = unitSystem === 'imperial' ? precipAvgMm / CONFIG.mmPerInch : precipAvgMm;
+        forecastAmount.push(precipDisplay);
+        totalAmount += precipDisplay;
 
         if (probabilities.length > 1) {
             const sorted = [...probabilities].sort((a, b) => a - b);
-            confidence.lower.push(getQuantile(sorted, alpha));
-            confidence.upper.push(getQuantile(sorted, 1 - alpha));
+            const lower = getQuantile(sorted, alpha);
+            const upper = getQuantile(sorted, 1 - alpha);
+            confidence.lower.push(lower);
+            confidence.upper.push(upper);
+            spreadSum += (upper - lower) / 2;
+            spreadCount += 1;
         } else {
             const singleVal = probabilities[0] ?? 0;
             confidence.lower.push(singleVal);
@@ -296,13 +317,15 @@ function buildForecastSeries(modelMaps, options) {
         confidence,
         forecastAmount,
         firstWarning,
+        peak: { probability: Math.max(0, peak.probability), time: peak.time },
+        totalAmount,
+        avgHalfSpread: spreadCount > 0 ? Math.round(spreadSum / spreadCount) : null,
     };
 }
 
 // --- Browser Application Controller ---
 
 function initApp() {
-    // Register service worker immediately (not nested inside window.onload)
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js')
             .catch((err) => console.warn('Service Worker registration failed:', err));
@@ -312,13 +335,27 @@ function initApp() {
     const dom = {
         weatherInfo: document.getElementById('weather-info'),
         warningMessage: document.getElementById('warning-message'),
+        metricsStrip: document.getElementById('metrics-strip'),
+        metricPeak: document.getElementById('metric-peak'),
+        metricPeakTime: document.getElementById('metric-peak-time'),
+        metricTotal: document.getElementById('metric-total'),
+        metricTotalWindow: document.getElementById('metric-total-window'),
+        metricSpread: document.getElementById('metric-spread'),
+        metricModelsCount: document.getElementById('metric-models-count'),
         lastUpdated: document.getElementById('last-updated'),
+        notificationBtn: document.getElementById('notification-btn'),
         notificationStatus: document.getElementById('notification-status'),
         locationForm: document.getElementById('location-form'),
         locationInput: document.getElementById('location-input'),
+        searchSuggestions: document.getElementById('search-suggestions'),
         locationDisplay: document.getElementById('location-display'),
         gpsButton: document.getElementById('gps-button'),
+        refreshButton: document.getElementById('refresh-button'),
         chartCanvas: document.getElementById('rainChart'),
+        horizonButtons: Array.from(document.querySelectorAll('.horizon-btn')),
+        chipModels: document.getElementById('chip-models'),
+        chipConfidence: document.getElementById('chip-confidence'),
+        chipAmount: document.getElementById('chip-amount'),
         thresholdInput: document.getElementById('threshold-input'),
         forecastHoursInput: document.getElementById('forecast-hours-input'),
         timeFormatToggle: document.getElementById('time-format-toggle'),
@@ -349,6 +386,10 @@ function initApp() {
         lastNotifiedKey: null,
         refreshTimerId: null,
         activeAbortController: null,
+        searchAbortController: null,
+        searchDebounceId: null,
+        suggestions: [],
+        activeSuggestionIndex: -1,
         rainChart: null,
         deferredInstallPrompt: null,
     };
@@ -370,6 +411,20 @@ function initApp() {
         }
     }
 
+    function formatClockTime(date, includeMinutes = true) {
+        const opts = includeMinutes
+            ? { hour: 'numeric', minute: '2-digit', hour12: !state.is24HourFormat }
+            : { hour: 'numeric', hour12: !state.is24HourFormat };
+        return date.toLocaleTimeString([], opts);
+    }
+
+    function formatPrecipAmount(value, unitSystem) {
+        if (unitSystem === 'imperial') {
+            return `${value < 0.01 && value > 0 ? '<0.01' : value.toFixed(2)} in`;
+        }
+        return `${value.toFixed(1)} mm`;
+    }
+
     // --- PWA Install Prompt ---
     window.addEventListener('beforeinstallprompt', (event) => {
         event.preventDefault();
@@ -385,6 +440,22 @@ function initApp() {
             state.deferredInstallPrompt = null;
             dom.installButton.style.display = 'none';
         });
+    }
+
+    // --- Toolbar & Controls Sync ---
+    function syncQuickControls() {
+        for (const btn of dom.horizonButtons) {
+            const hours = parseInt(btn.dataset.hours, 10);
+            btn.classList.toggle('active', hours === state.forecastHours);
+        }
+        if (dom.chipModels) dom.chipModels.setAttribute('aria-pressed', String(state.showEnsembleMembers));
+        if (dom.chipConfidence) dom.chipConfidence.setAttribute('aria-pressed', String(state.showConfidenceBounds));
+        if (dom.chipAmount) dom.chipAmount.setAttribute('aria-pressed', String(state.showExpectedAmount));
+
+        if (dom.forecastHoursInput) dom.forecastHoursInput.value = state.forecastHours;
+        if (dom.showEnsembleToggle) dom.showEnsembleToggle.checked = state.showEnsembleMembers;
+        if (dom.confidenceToggle) dom.confidenceToggle.checked = state.showConfidenceBounds;
+        if (dom.showAmountToggle) dom.showAmountToggle.checked = state.showExpectedAmount;
     }
 
     // --- Chart Management ---
@@ -404,14 +475,19 @@ function initApp() {
         if (amount) amount.hidden = !state.showExpectedAmount;
 
         state.rainChart.options.scales.y1.display = state.showExpectedAmount;
-        state.rainChart.update(updateMode);
+        syncQuickControls();
+        if (updateMode === 'none') {
+            state.rainChart.stop();
+        }
+        state.rainChart.update();
     }
 
     function initializeChart() {
         if (!dom.chartCanvas || typeof Chart === 'undefined') return;
         const ctx = dom.chartCanvas.getContext('2d');
 
-        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.color = '#8295ab';
+        Chart.defaults.font.family = "'Plus Jakarta Sans', -apple-system, sans-serif";
         Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.05)';
 
         const modelDatasets = MODEL_CONFIGS.map((cfg) => ({
@@ -423,10 +499,11 @@ function initApp() {
             type: 'line',
             borderColor: cfg.color,
             backgroundColor: cfg.color,
-            borderWidth: 1.75,
-            tension: 0.25,
+            borderWidth: cfg.width,
+            tension: 0.3,
             fill: false,
             pointRadius: 0,
+            pointHoverRadius: 4,
             order: 1,
             hidden: true,
         }));
@@ -441,21 +518,25 @@ function initApp() {
                         label: 'Ensemble Avg',
                         data: [],
                         yAxisID: 'y',
-                        backgroundColor: 'rgba(56, 189, 248, 0.4)',
-                        borderColor: 'rgba(56, 189, 248, 1)',
+                        backgroundColor: 'rgba(56, 189, 248, 0.35)',
+                        borderColor: 'rgba(56, 189, 248, 0.78)',
                         borderWidth: 1,
+                        borderRadius: { topLeft: 5, topRight: 5 },
+                        borderSkipped: 'bottom',
+                        maxBarThickness: 28,
                         order: 2,
                     },
                     ...modelDatasets,
                     {
                         id: DATASET_IDS.confidenceUpper,
-                        label: 'Confidence Bound',
+                        label: 'Confidence Interval',
                         data: [],
                         yAxisID: 'y',
                         fill: '+1',
-                        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                        backgroundColor: 'rgba(148, 163, 184, 0.14)',
                         borderColor: 'transparent',
                         pointRadius: 0,
+                        tension: 0.25,
                         type: 'line',
                         order: 0,
                         hidden: true,
@@ -468,17 +549,20 @@ function initApp() {
                         fill: false,
                         borderColor: 'transparent',
                         pointRadius: 0,
+                        tension: 0.25,
                         type: 'line',
                         hidden: true,
                     },
                     {
                         id: DATASET_IDS.forecastAmount,
-                        label: 'Forecast Amount',
+                        label: 'Expected Amount',
                         data: [],
                         yAxisID: 'y1',
-                        backgroundColor: 'rgba(250, 204, 21, 0.4)',
-                        borderColor: 'rgba(250, 204, 21, 1)',
+                        backgroundColor: 'rgba(251, 191, 36, 0.3)',
+                        borderColor: 'rgba(251, 191, 36, 0.85)',
                         borderWidth: 1,
+                        borderRadius: { topLeft: 4, topRight: 4 },
+                        maxBarThickness: 18,
                         order: 3,
                         hidden: true,
                     },
@@ -493,21 +577,52 @@ function initApp() {
                         position: 'left',
                         beginAtZero: true,
                         max: 100,
-                        grid: { color: 'rgba(255, 255, 255, 0.03)' },
-                        title: { display: true, text: 'Rain Probability (%)', color: '#f8fafc' },
+                        ticks: {
+                            stepSize: 25,
+                            callback: (val) => `${val}%`,
+                            font: { family: "'JetBrains Mono', monospace", size: 10 },
+                        },
+                        grid: { color: 'rgba(255, 255, 255, 0.045)' },
+                        border: { display: false },
                     },
                     y1: {
                         type: 'linear',
                         position: 'right',
                         display: false,
                         beginAtZero: true,
-                        title: { display: true, text: 'Forecast Amount (mm)', color: '#f8fafc' },
+                        ticks: {
+                            font: { family: "'JetBrains Mono', monospace", size: 10 },
+                        },
+                        title: {
+                            display: true,
+                            text: 'Amount (mm)',
+                            color: '#94a3b8',
+                            font: { size: 10, weight: 600 },
+                        },
                         grid: { drawOnChartArea: false },
+                        border: { display: false },
                     },
-                    x: { grid: { display: false } },
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            font: { family: "'JetBrains Mono', monospace", size: 10 },
+                            maxRotation: 0,
+                            autoSkipPadding: 8,
+                        },
+                    },
                 },
                 plugins: {
                     tooltip: {
+                        backgroundColor: 'rgba(9, 19, 29, 0.94)',
+                        titleColor: '#f1f5f9',
+                        bodyColor: '#cbd5e1',
+                        borderColor: 'rgba(255, 255, 255, 0.14)',
+                        borderWidth: 1,
+                        padding: 10,
+                        cornerRadius: 8,
+                        displayColors: true,
+                        boxPadding: 4,
                         filter: (item) => item.dataset.id !== DATASET_IDS.confidenceLower,
                         callbacks: {
                             label: (context) => {
@@ -516,22 +631,29 @@ function initApp() {
                                 if (context.dataset.id === DATASET_IDS.forecastAmount) {
                                     const unit = state.unitSystem === 'imperial' ? 'in' : 'mm';
                                     const decimals = state.unitSystem === 'imperial' ? 3 : 2;
-                                    return `${context.dataset.label}: ${value.toFixed(decimals)} ${unit}`;
+                                    return ` ${context.dataset.label}: ${value.toFixed(decimals)} ${unit}`;
                                 }
                                 if (context.dataset.id === DATASET_IDS.confidenceUpper) {
                                     const lowerVal = getDataset(DATASET_IDS.confidenceLower)?.data?.[context.dataIndex];
                                     if (Number.isFinite(lowerVal)) {
-                                        return `${context.dataset.label}: ${Math.round(lowerVal)}%–${Math.round(value)}%`;
+                                        return ` ${context.dataset.label}: ${Math.round(lowerVal)}%–${Math.round(value)}%`;
                                     }
                                 }
-                                return `${context.dataset.label}: ${Math.round(value)}%`;
+                                return ` ${context.dataset.label}: ${Math.round(value)}%`;
                             },
                         },
                     },
                     legend: {
                         display: true,
                         position: 'bottom',
-                        labels: { boxWidth: 10, padding: 14, font: { size: 10 } },
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            boxWidth: 7,
+                            boxHeight: 7,
+                            padding: 14,
+                            font: { size: 11, weight: 500 },
+                        },
                         onClick: (event, legendItem, legend) => {
                             const chart = legend.chart;
                             const dataset = chart.data.datasets[legendItem.datasetIndex];
@@ -540,7 +662,6 @@ function initApp() {
                             if (dataset.id === DATASET_IDS.confidenceUpper) {
                                 state.showConfidenceBounds = !state.showConfidenceBounds;
                                 writeStorage(STORAGE_KEYS.showConfidenceBounds, state.showConfidenceBounds);
-                                if (dom.confidenceToggle) dom.confidenceToggle.checked = state.showConfidenceBounds;
                                 syncDatasetVisibility();
                                 return;
                             }
@@ -548,7 +669,6 @@ function initApp() {
                             if (dataset.id === DATASET_IDS.forecastAmount) {
                                 state.showExpectedAmount = !state.showExpectedAmount;
                                 writeStorage(STORAGE_KEYS.showExpectedAmount, state.showExpectedAmount);
-                                if (dom.showAmountToggle) dom.showAmountToggle.checked = state.showExpectedAmount;
                                 syncDatasetVisibility();
                                 return;
                             }
@@ -560,12 +680,22 @@ function initApp() {
                         annotations: {
                             thresholdLine: {
                                 type: 'line',
-                                yMin: state.threshold,
-                                yMax: state.threshold,
-                                borderColor: 'rgba(244, 63, 94, 0.8)',
-                                borderWidth: 2,
-                                borderDash: [4, 4],
                                 scaleID: 'y',
+                                value: state.threshold,
+                                drawTime: 'afterDatasetsDraw',
+                                borderColor: 'rgba(251, 191, 36, 0.85)',
+                                borderWidth: 1.5,
+                                borderDash: [5, 4],
+                                label: {
+                                    display: true,
+                                    content: `${state.threshold}%`,
+                                    position: 'end',
+                                    backgroundColor: 'rgba(9, 19, 29, 0.9)',
+                                    color: '#fbbf24',
+                                    font: { family: "'JetBrains Mono', monospace", size: 10, weight: 600 },
+                                    padding: { x: 6, y: 2 },
+                                    borderRadius: 4,
+                                },
                             },
                         },
                     },
@@ -579,22 +709,28 @@ function initApp() {
         if (!state.rainChart) return;
 
         const activeIds = new Set(series.activeModels.map((m) => m.id));
-        const fixedLegendIds = new Set([
-            DATASET_IDS.ensembleAvg,
-            DATASET_IDS.confidenceUpper,
-            DATASET_IDS.forecastAmount,
-        ]);
 
         state.rainChart.options.plugins.legend.labels.filter = (item, chartData) => {
             const ds = chartData.datasets[item.datasetIndex];
             if (!ds) return false;
-            if (fixedLegendIds.has(ds.id)) return true;
+            if (ds.id === DATASET_IDS.ensembleAvg) return true;
+            if (ds.id === DATASET_IDS.confidenceUpper) return state.showConfidenceBounds;
+            if (ds.id === DATASET_IDS.forecastAmount) return state.showExpectedAmount;
             if (ds.id === DATASET_IDS.confidenceLower) return false;
             return state.showEnsembleMembers && activeIds.has(ds.modelId);
         };
 
         state.rainChart.data.labels = series.labels;
-        getDataset(DATASET_IDS.ensembleAvg).data = series.ensembleAverage;
+
+        const ensembleDs = getDataset(DATASET_IDS.ensembleAvg);
+        ensembleDs.data = series.ensembleAverage;
+        ensembleDs.backgroundColor = series.ensembleAverage.map((val) =>
+            val >= state.threshold ? 'rgba(56, 189, 248, 0.56)' : 'rgba(56, 189, 248, 0.24)'
+        );
+        ensembleDs.borderColor = series.ensembleAverage.map((val) =>
+            val >= state.threshold ? 'rgba(125, 211, 252, 0.92)' : 'rgba(56, 189, 248, 0.55)'
+        );
+
         getDataset(DATASET_IDS.confidenceUpper).data = series.confidence.upper;
         getDataset(DATASET_IDS.confidenceLower).data = series.confidence.lower;
         getDataset(DATASET_IDS.forecastAmount).data = series.forecastAmount;
@@ -608,33 +744,40 @@ function initApp() {
 
         const thresholdLine = state.rainChart.options.plugins.annotation?.annotations?.thresholdLine;
         if (thresholdLine) {
-            thresholdLine.yMin = state.threshold;
-            thresholdLine.yMax = state.threshold;
+            thresholdLine.value = state.threshold;
+            if (thresholdLine.label) {
+                thresholdLine.label.content = `${state.threshold}%`;
+            }
         }
 
         const precipUnitLabel = state.unitSystem === 'imperial' ? 'in' : 'mm';
-        state.rainChart.options.scales.y1.title.text = `Forecast Amount (${precipUnitLabel})`;
+        state.rainChart.options.scales.y1.title.text = `Amount (${precipUnitLabel})`;
 
         syncDatasetVisibility();
     }
 
     // --- Notifications ---
-    function requestNotificationPermission() {
+    function syncNotificationStatus() {
+        if (!dom.notificationStatus) return;
         if (!('Notification' in window)) {
-            if (dom.notificationStatus) dom.notificationStatus.textContent = 'Not Supported';
+            dom.notificationStatus.textContent = 'Unsupported';
             return;
         }
-
         if (Notification.permission === 'granted') {
-            if (dom.notificationStatus) dom.notificationStatus.textContent = 'Enabled';
+            dom.notificationStatus.textContent = 'On';
+        } else if (Notification.permission === 'denied') {
+            dom.notificationStatus.textContent = 'Blocked';
+        } else {
+            dom.notificationStatus.textContent = 'Enable';
+        }
+    }
+
+    function requestNotificationPermission() {
+        if (!('Notification' in window) || Notification.permission !== 'default') {
+            syncNotificationStatus();
             return;
         }
-
-        Notification.requestPermission().then((permission) => {
-            if (dom.notificationStatus) {
-                dom.notificationStatus.textContent = permission === 'granted' ? 'Enabled' : 'Disabled';
-            }
-        });
+        Notification.requestPermission().then(() => syncNotificationStatus());
     }
 
     function sendNotification(title, body, dedupeKey) {
@@ -651,71 +794,103 @@ function initApp() {
 
     // --- UI Feedback ---
     function setLoadingState(message) {
+        if (dom.refreshButton) dom.refreshButton.classList.add('is-loading');
         if (dom.weatherInfo) {
             dom.weatherInfo.classList.remove('hidden');
             const textEl = dom.weatherInfo.querySelector('.loading-text');
-            if (textEl) {
-                textEl.textContent = message;
-            } else {
-                dom.weatherInfo.textContent = message;
-            }
+            if (textEl) textEl.textContent = message;
         }
-        if (dom.warningMessage) {
-            dom.warningMessage.classList.add('hidden');
-        }
+        if (dom.warningMessage) dom.warningMessage.classList.add('hidden');
     }
 
     function hideLoadingState() {
+        if (dom.refreshButton) dom.refreshButton.classList.remove('is-loading');
         if (dom.weatherInfo) dom.weatherInfo.classList.add('hidden');
     }
 
-    function showStatusBanner(type, contentFn) {
+    function renderStatusBanner(type, headline, detail) {
         if (!dom.warningMessage) return;
-        dom.warningMessage.className = type;
+        dom.warningMessage.className = `status-banner ${type}`;
         dom.warningMessage.textContent = '';
-        contentFn(dom.warningMessage);
+
+        const iconWrap = document.createElement('span');
+        iconWrap.className = 'status-icon';
+        iconWrap.innerHTML = STATUS_ICONS[type] || STATUS_ICONS.safe;
+
+        const copy = document.createElement('div');
+        copy.className = 'status-copy';
+
+        const titleEl = document.createElement('p');
+        titleEl.className = 'status-headline';
+        titleEl.textContent = headline;
+
+        copy.appendChild(titleEl);
+        if (detail) {
+            const detailEl = document.createElement('p');
+            detailEl.className = 'status-detail';
+            detailEl.textContent = detail;
+            copy.appendChild(detailEl);
+        }
+
+        dom.warningMessage.append(iconWrap, copy);
     }
 
     function handleFetchError(message) {
         hideLoadingState();
         document.body.classList.remove('state-warning');
-        showStatusBanner('warning', (el) => {
-            el.textContent = message;
-        });
+        renderStatusBanner('error', message, 'Try refreshing or searching for another city.');
     }
 
     function displayWarning(probability, time, shouldNotify) {
-        const formattedTime = time.toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: !state.is24HourFormat,
-        });
-
-        showStatusBanner('warning', (el) => {
-            const strongWarn = document.createElement('strong');
-            strongWarn.textContent = 'Warning! ';
-            const strongTime = document.createElement('strong');
-            strongTime.textContent = formattedTime;
-            el.append(strongWarn, `${probability}% chance of rain around `, strongTime);
-        });
+        const formattedTime = formatClockTime(time, true);
+        renderStatusBanner(
+            'warning',
+            `Rain likely around ${formattedTime}`,
+            `${probability}% ensemble average · meets ≥${state.threshold}% alert threshold`
+        );
         document.body.classList.add('state-warning');
 
         if (shouldNotify) {
             const key = `${state.locationName}|${time.toISOString()}|${state.threshold}`;
             sendNotification(
                 'Rain Warning',
-                `Warning! ${probability}% chance of rain around ${formattedTime}.`,
+                `${probability}% chance of rain around ${formattedTime} in ${state.locationName}.`,
                 key
             );
         }
     }
 
     function displaySafeMessage() {
-        showStatusBanner('safe', (el) => {
-            el.textContent = `No significant rain risk (≥${state.threshold}%) in the next ${state.forecastHours}h.`;
-        });
+        renderStatusBanner(
+            'safe',
+            `Clear for the next ${state.forecastHours} hours`,
+            `Rain risk stays below your ${state.threshold}% alert threshold`
+        );
         document.body.classList.remove('state-warning');
         state.lastNotifiedKey = null;
+    }
+
+    function updateMetricsStrip(series) {
+        if (!dom.metricsStrip) return;
+        dom.metricsStrip.classList.remove('hidden');
+
+        if (dom.metricPeak) dom.metricPeak.textContent = `${series.peak.probability}%`;
+        if (dom.metricPeakTime) {
+            dom.metricPeakTime.textContent = series.peak.probability > 0
+                ? `at ${formatClockTime(series.peak.time, false)}`
+                : 'dry window';
+        }
+
+        if (dom.metricTotal) dom.metricTotal.textContent = formatPrecipAmount(series.totalAmount, state.unitSystem);
+        if (dom.metricTotalWindow) dom.metricTotalWindow.textContent = `next ${state.forecastHours}h`;
+
+        if (dom.metricSpread) {
+            dom.metricSpread.textContent = series.avgHalfSpread !== null ? `±${series.avgHalfSpread}%` : '--';
+        }
+        if (dom.metricModelsCount) {
+            const count = series.activeModels.length;
+            dom.metricModelsCount.textContent = `${count} ${count === 1 ? 'model' : 'models'}`;
+        }
     }
 
     // --- Network Fetchers ---
@@ -779,7 +954,6 @@ function initApp() {
             fetchNWSForecast(state.latitude, state.longitude, controller.signal),
         ]);
 
-        // Ignore superseded requests
         if (controller.signal.aborted) return;
 
         const openMeteoMaps = openMeteoResult.status === 'fulfilled' ? openMeteoResult.value : {};
@@ -818,7 +992,7 @@ function initApp() {
 
         if (dom.dataSource) {
             const names = series.activeModels.map((m) => m.label);
-            dom.dataSource.textContent = `Sources: ${names.join(', ') || 'None'}`;
+            dom.dataSource.textContent = `Sources: ${names.join(' · ') || 'None'}`;
         }
 
         if (series.firstWarning) {
@@ -827,14 +1001,104 @@ function initApp() {
             displaySafeMessage();
         }
 
+        updateMetricsStrip(series);
         updateChart(series);
 
         if (dom.lastUpdated) {
-            dom.lastUpdated.textContent = now.toLocaleTimeString([], { hour12: !state.is24HourFormat });
+            dom.lastUpdated.textContent = formatClockTime(now, true);
         }
     }
 
-    // --- Location Management ---
+    // --- Location Search & Autocomplete ---
+    function formatLocationLabel(loc) {
+        const region = loc.admin1 || loc.country;
+        return region ? `${loc.name}, ${region}` : loc.name;
+    }
+
+    function closeSuggestions() {
+        state.suggestions = [];
+        state.activeSuggestionIndex = -1;
+        if (dom.searchSuggestions) {
+            dom.searchSuggestions.classList.add('hidden');
+            dom.searchSuggestions.textContent = '';
+        }
+        if (dom.locationInput) {
+            dom.locationInput.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function renderSuggestions(results) {
+        if (!dom.searchSuggestions) return;
+        state.suggestions = results;
+        state.activeSuggestionIndex = -1;
+        dom.searchSuggestions.textContent = '';
+
+        if (!results.length) {
+            closeSuggestions();
+            return;
+        }
+
+        results.forEach((loc, idx) => {
+            const li = document.createElement('li');
+            li.className = 'suggestion-item';
+            li.setAttribute('role', 'option');
+            li.dataset.index = String(idx);
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'suggestion-name';
+            nameEl.textContent = loc.name;
+
+            const regionEl = document.createElement('span');
+            regionEl.className = 'suggestion-region';
+            regionEl.textContent = [loc.admin1, loc.country].filter(Boolean).join(', ');
+
+            li.append(nameEl, regionEl);
+            li.addEventListener('mousedown', (event) => {
+                event.preventDefault();
+                selectSuggestion(loc);
+            });
+            dom.searchSuggestions.appendChild(li);
+        });
+
+        dom.searchSuggestions.classList.remove('hidden');
+        if (dom.locationInput) {
+            dom.locationInput.setAttribute('aria-expanded', 'true');
+        }
+    }
+
+    function highlightSuggestion(index) {
+        if (!dom.searchSuggestions) return;
+        const items = dom.searchSuggestions.querySelectorAll('.suggestion-item');
+        items.forEach((item, i) => item.classList.toggle('is-active', i === index));
+        state.activeSuggestionIndex = index;
+    }
+
+    function selectSuggestion(loc) {
+        closeSuggestions();
+        if (dom.locationInput) {
+            dom.locationInput.value = '';
+            dom.locationInput.blur();
+        }
+        saveAndSetLocation(loc.latitude, loc.longitude, formatLocationLabel(loc));
+    }
+
+    async function fetchLocationSuggestions(query) {
+        if (state.searchAbortController) {
+            state.searchAbortController.abort();
+        }
+        const controller = new AbortController();
+        state.searchAbortController = controller;
+
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+        try {
+            const data = await fetchJson(url, controller.signal);
+            if (controller.signal.aborted) return;
+            renderSuggestions(data.results || []);
+        } catch {
+            if (!controller.signal.aborted) closeSuggestions();
+        }
+    }
+
     function saveAndSetLocation(lat, lon, name) {
         writeStorage(STORAGE_KEYS.location, JSON.stringify({ latitude: lat, longitude: lon, name }));
         setLocation(lat, lon, name);
@@ -871,6 +1135,7 @@ function initApp() {
     }
 
     async function searchLocation(locationName) {
+        closeSuggestions();
         setLoadingState('Finding location...');
         const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
         try {
@@ -880,9 +1145,11 @@ function initApp() {
                 handleFetchError(`Location "${locationName}" not found.`);
                 return;
             }
-            const region = loc.admin1 || loc.country;
-            const displayName = region ? `${loc.name}, ${region}` : loc.name;
-            saveAndSetLocation(loc.latitude, loc.longitude, displayName);
+            if (dom.locationInput) {
+                dom.locationInput.value = '';
+                dom.locationInput.blur();
+            }
+            saveAndSetLocation(loc.latitude, loc.longitude, formatLocationLabel(loc));
         } catch {
             handleFetchError('Failed to look up location.');
         }
@@ -943,13 +1210,22 @@ function initApp() {
         state.unitSystem = savedUnit === 'imperial' ? 'imperial' : 'metric';
 
         if (dom.thresholdInput) dom.thresholdInput.value = state.threshold;
-        if (dom.forecastHoursInput) dom.forecastHoursInput.value = state.forecastHours;
         if (dom.alphaInput) dom.alphaInput.value = state.alpha;
         if (dom.timeFormatToggle) dom.timeFormatToggle.checked = state.is24HourFormat;
-        if (dom.confidenceToggle) dom.confidenceToggle.checked = state.showConfidenceBounds;
-        if (dom.showEnsembleToggle) dom.showEnsembleToggle.checked = state.showEnsembleMembers;
-        if (dom.showAmountToggle) dom.showAmountToggle.checked = state.showExpectedAmount;
         if (dom.unitSystemSelect) dom.unitSystemSelect.value = state.unitSystem;
+        syncQuickControls();
+    }
+
+    function setForecastHours(hours) {
+        state.forecastHours = clamp(
+            hours,
+            CONFIG.limits.forecastHours.min,
+            CONFIG.limits.forecastHours.max,
+            state.forecastHours
+        );
+        writeStorage(STORAGE_KEYS.forecastHours, state.forecastHours);
+        syncQuickControls();
+        renderForecast();
     }
 
     function bindEventListeners() {
@@ -960,6 +1236,7 @@ function initApp() {
                 state[stateKey] = clamp(parser(el.value), min, max, state[stateKey]);
                 el.value = state[stateKey];
                 writeStorage(storageKey, state[stateKey]);
+                syncQuickControls();
                 renderForecast();
             });
         }
@@ -969,6 +1246,7 @@ function initApp() {
             el.addEventListener('change', () => {
                 state[stateKey] = el.checked;
                 writeStorage(storageKey, state[stateKey]);
+                syncQuickControls();
                 onToggle();
             });
         }
@@ -982,6 +1260,39 @@ function initApp() {
         bindToggleSetting(dom.confidenceToggle, 'showConfidenceBounds', STORAGE_KEYS.showConfidenceBounds, () => syncDatasetVisibility('none'));
         bindToggleSetting(dom.showAmountToggle, 'showExpectedAmount', STORAGE_KEYS.showExpectedAmount, () => syncDatasetVisibility('none'));
 
+        // Quick horizon segmented controls
+        for (const btn of dom.horizonButtons) {
+            btn.addEventListener('click', () => {
+                setForecastHours(parseInt(btn.dataset.hours, 10));
+            });
+        }
+
+        // Quick chart layer toggle chips
+        if (dom.chipModels) {
+            dom.chipModels.addEventListener('click', () => {
+                state.showEnsembleMembers = !state.showEnsembleMembers;
+                writeStorage(STORAGE_KEYS.showEnsembleMembers, state.showEnsembleMembers);
+                syncQuickControls();
+                renderForecast();
+            });
+        }
+
+        if (dom.chipConfidence) {
+            dom.chipConfidence.addEventListener('click', () => {
+                state.showConfidenceBounds = !state.showConfidenceBounds;
+                writeStorage(STORAGE_KEYS.showConfidenceBounds, state.showConfidenceBounds);
+                syncDatasetVisibility('none');
+            });
+        }
+
+        if (dom.chipAmount) {
+            dom.chipAmount.addEventListener('click', () => {
+                state.showExpectedAmount = !state.showExpectedAmount;
+                writeStorage(STORAGE_KEYS.showExpectedAmount, state.showExpectedAmount);
+                syncDatasetVisibility('none');
+            });
+        }
+
         if (dom.unitSystemSelect) {
             dom.unitSystemSelect.addEventListener('change', () => {
                 state.unitSystem = dom.unitSystemSelect.value === 'imperial' ? 'imperial' : 'metric';
@@ -990,24 +1301,63 @@ function initApp() {
             });
         }
 
+        // Location search + debounced autocomplete + keyboard navigation
+        if (dom.locationInput) {
+            dom.locationInput.addEventListener('input', () => {
+                const query = dom.locationInput.value.trim();
+                clearTimeout(state.searchDebounceId);
+                if (query.length < 2) {
+                    closeSuggestions();
+                    return;
+                }
+                state.searchDebounceId = setTimeout(() => fetchLocationSuggestions(query), CONFIG.searchDebounceMs);
+            });
+
+            dom.locationInput.addEventListener('keydown', (event) => {
+                if (!state.suggestions.length) return;
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    const next = (state.activeSuggestionIndex + 1) % state.suggestions.length;
+                    highlightSuggestion(next);
+                } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const prev = (state.activeSuggestionIndex - 1 + state.suggestions.length) % state.suggestions.length;
+                    highlightSuggestion(prev);
+                } else if (event.key === 'Enter' && state.activeSuggestionIndex >= 0) {
+                    event.preventDefault();
+                    selectSuggestion(state.suggestions[state.activeSuggestionIndex]);
+                } else if (event.key === 'Escape') {
+                    closeSuggestions();
+                }
+            });
+
+            dom.locationInput.addEventListener('blur', () => {
+                setTimeout(closeSuggestions, 150);
+            });
+        }
+
         if (dom.locationForm) {
             dom.locationForm.addEventListener('submit', (event) => {
                 event.preventDefault();
+                if (state.activeSuggestionIndex >= 0 && state.suggestions[state.activeSuggestionIndex]) {
+                    selectSuggestion(state.suggestions[state.activeSuggestionIndex]);
+                    return;
+                }
                 const query = dom.locationInput?.value.trim();
                 if (query) searchLocation(query);
             });
         }
 
-        if (dom.gpsButton) {
-            dom.gpsButton.addEventListener('click', handleGpsClick);
-        }
+        if (dom.gpsButton) dom.gpsButton.addEventListener('click', handleGpsClick);
+        if (dom.refreshButton) dom.refreshButton.addEventListener('click', refreshWeatherData);
+        if (dom.notificationBtn) dom.notificationBtn.addEventListener('click', requestNotificationPermission);
     }
 
     // --- Boot ---
     loadSavedSettings();
     initializeChart();
     bindEventListeners();
-    requestNotificationPermission();
+    syncNotificationStatus();
     loadSavedLocation();
 }
 

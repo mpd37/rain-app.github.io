@@ -3,8 +3,8 @@
   "short_name": "RainWarn",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#09131d",
+  "theme_color": "#09131d",
   "description": "A simple app to provide rain warnings based on ensemble weather forecasts.",
   "icons": [
     {

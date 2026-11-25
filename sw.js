@@ -1,6 +1,6 @@
 // Service worker for Rain Warning PWA
 
-const CACHE_NAME = 'rain-warning-cache-v8';
+const CACHE_NAME = 'rain-warning-cache-v9';
 const APP_SHELL_URLS = [
     './',
     'index.html',
@@ -13,7 +13,7 @@ const APP_SHELL_URLS = [
 const CDN_URLS = [
     'https://cdn.jsdelivr.net/npm/chart.js',
     'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js',
-    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
+    'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap',
 ];
 
 self.addEventListener('install', (event) => {
