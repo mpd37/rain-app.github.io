@@ -1,75 +1,69 @@
-// A simple caching service worker
+// Service worker for Rain Warning PWA
 
-const CACHE_NAME = 'rain-warning-cache-v7';
-const urlsToCache = [
-  './',
-  'index.html',
-  'style.css',
-  'app.js',
-  'https://cdn.jsdelivr.net/npm/chart.js',
-  'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap',
-  'icon-192.png',
-  'icon-512.png'
+const CACHE_NAME = 'rain-warning-cache-v8';
+const APP_SHELL_URLS = [
+    './',
+    'index.html',
+    'style.css',
+    'app.js',
+    'manifest.json',
+    'icon-192.png',
+    'icon-512.png',
+];
+const CDN_URLS = [
+    'https://cdn.jsdelivr.net/npm/chart.js',
+    'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js',
+    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
 ];
 
-// Install event: opens a cache and adds the core files to it.
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
-  );
-});
-
-// Fetch event: serves assets from the cache first.
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-        return fetch(event.request).then(
-            function(response) {
-                // Check if we received a valid response
-                if(!response || response.status !== 200 || response.type !== 'basic') {
-                    return response;
-                }
-
-                // IMPORTANT: Clone the response. A response is a stream
-                // and because we want the browser to consume the response
-                // as well as the cache consuming the response, we need
-                // to clone it so we have two streams.
-                var responseToCache = response.clone();
-
-                caches.open(CACHE_NAME)
-                    .then(function(cache) {
-                        cache.put(event.request, responseToCache);
-                    });
-
-                return response;
-            }
-        );
-      })
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE_NAME)
+            .then((cache) => cache.addAll([...APP_SHELL_URLS, ...CDN_URLS]))
+            .then(() => self.skipWaiting())
     );
 });
 
-// Activate event: removes old caches.
-self.addEventListener('activate', event => {
-  const cacheWhitelist = [CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-  );
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys()
+            .then((cacheNames) =>
+                Promise.all(
+                    cacheNames
+                        .filter((name) => name !== CACHE_NAME)
+                        .map((name) => caches.delete(name))
+                )
+            )
+            .then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener('fetch', (event) => {
+    if (event.request.method !== 'GET') return;
+
+    const url = new URL(event.request.url);
+    const isSameOrigin = url.origin === self.location.origin;
+
+    if (isSameOrigin) {
+        // Network-first for app shell so updates apply immediately, with cache fallback offline.
+        event.respondWith(
+            fetch(event.request)
+                .then((response) => {
+                    if (response && response.ok && response.type === 'basic') {
+                        const copy = response.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+                    }
+                    return response;
+                })
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
+
+    // Cache-first only for pre-cached CDN assets; live weather API calls bypass the cache.
+    if (CDN_URLS.includes(event.request.url)) {
+        event.respondWith(
+            caches.match(event.request).then((cached) => cached || fetch(event.request))
+        );
+    }
 });

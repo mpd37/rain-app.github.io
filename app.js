@@ -1,633 +1,1035 @@
 /**
- * Rain Warning - Logic Controller
+ * Rain Warning - Ensemble Forecast Controller
+ * Aggregates hourly precipitation forecasts from Open-Meteo (GFS, ECMWF, ICON),
+ * Google DeepMind WeatherNext 3 (via Open-Meteo Ensemble Mean API), and NWS.
  */
 
-window.onload = () => {
-    // --- PWA Service Worker Registration ---
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('Service Worker registered.'))
-                .catch(err => console.log('Service Worker registration failed: ', err));
+'use strict';
+
+const CONFIG = {
+    refreshIntervalMs: 20 * 60 * 1000,
+    openMeteoModels: [
+        { id: 'gfs', apiKey: 'gfs_seamless' },
+        { id: 'ecmwf', apiKey: 'ecmwf_ifs' },
+        { id: 'icon', apiKey: 'icon_seamless' },
+    ],
+    weatherNext3Model: 'google_weathernext3_ensemble_mean',
+    precipThresholdMm: 0.1,
+    mmPerInch: 25.4,
+    defaultLocation: {
+        latitude: 49.2827,
+        longitude: -123.1207,
+        name: 'Vancouver, BC',
+    },
+    limits: {
+        threshold: { min: 0, max: 100 },
+        forecastHours: { min: 1, max: 24 },
+        alpha: { min: 0.01, max: 0.5 },
+    },
+    defaults: {
+        threshold: 25,
+        forecastHours: 12,
+        alpha: 0.25,
+        unitSystem: 'metric',
+        is24HourFormat: false,
+        showConfidenceBounds: false,
+        showEnsembleMembers: false,
+        showExpectedAmount: false,
+    },
+};
+
+const MODEL_CONFIGS = [
+    { id: 'gfs', label: 'GFS', color: 'rgba(16, 185, 129, 0.75)' },
+    { id: 'ecmwf', label: 'ECMWF', color: 'rgba(249, 115, 22, 0.75)' },
+    { id: 'icon', label: 'ICON', color: 'rgba(139, 92, 246, 0.75)' },
+    { id: 'weathernext3', label: 'WeatherNext 3', color: 'rgba(232, 121, 249, 0.85)' },
+    { id: 'nws', label: 'NWS', color: 'rgba(244, 63, 94, 0.75)' },
+];
+
+const STORAGE_KEYS = {
+    location: 'weatherLocation',
+    threshold: 'rainWarningThreshold',
+    forecastHours: 'forecastHours',
+    is24HourFormat: 'is24HourFormat',
+    showConfidenceBounds: 'showConfidenceBounds',
+    showEnsembleMembers: 'showEnsembleMembers',
+    showExpectedAmount: 'showExpectedAmount',
+    alpha: 'quantileAlpha',
+    unitSystem: 'unitSystem',
+};
+
+const DATASET_IDS = {
+    ensembleAvg: 'ensemble-avg',
+    confidenceUpper: 'confidence-upper',
+    confidenceLower: 'confidence-lower',
+    forecastAmount: 'forecast-amount',
+    modelPrefix: 'model-',
+};
+
+// --- Pure Math & Parsing Helpers ---
+
+function clamp(value, min, max, fallback) {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, value));
+}
+
+function getQuantile(sortedValues, q) {
+    if (!sortedValues.length) return 0;
+    const pos = (sortedValues.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    if (sortedValues[base + 1] !== undefined) {
+        return sortedValues[base] + rest * (sortedValues[base + 1] - sortedValues[base]);
+    }
+    return sortedValues[base];
+}
+
+/**
+ * Estimates hourly probability of precipitation (>= thresholdMm) from
+ * WeatherNext 3 ensemble percentiles (p10, p25, p50, p75, p90) and mean
+ * via piecewise-linear interpolation of the empirical CDF.
+ */
+function estimateProbabilityFromPercentiles(stats, thresholdMm = CONFIG.precipThresholdMm) {
+    if (!stats) return null;
+    const { p10, p25, p50, p75, p90, mean } = stats;
+    const quantiles = [
+        [0.10, p10],
+        [0.25, p25],
+        [0.50, p50],
+        [0.75, p75],
+        [0.90, p90],
+    ];
+
+    if (quantiles.some(([, value]) => !Number.isFinite(value))) {
+        return null;
+    }
+
+    if (p90 < thresholdMm) {
+        // More than 90% of ensemble members are below threshold; if the mean still reaches
+        // threshold, a rare upper-tail precipitation signal (<10% probability) is present.
+        return Number.isFinite(mean) && mean >= thresholdMm ? 5 : 0;
+    }
+
+    const points = [[0, 0], ...quantiles];
+    for (let i = 1; i < points.length; i++) {
+        const [q0, v0] = points[i - 1];
+        const [q1, v1] = points[i];
+        if (v1 >= thresholdMm) {
+            const cdf = v1 <= v0
+                ? q1
+                : q0 + ((thresholdMm - v0) / (v1 - v0)) * (q1 - q0);
+            return clamp((1 - cdf) * 100, 0, 100, 0);
+        }
+    }
+
+    return 0;
+}
+
+function parseUtcHourTimestamp(isoString) {
+    if (typeof isoString !== 'string') return NaN;
+    const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(isoString) ? isoString : `${isoString}Z`;
+    return Date.parse(normalized);
+}
+
+function parseOpenMeteoForecast(raw) {
+    const maps = {};
+    for (const model of CONFIG.openMeteoModels) {
+        maps[model.id] = new Map();
+    }
+
+    const hourly = raw?.hourly;
+    if (!hourly || !Array.isArray(hourly.time)) return maps;
+
+    for (let i = 0; i < hourly.time.length; i++) {
+        const ts = parseUtcHourTimestamp(hourly.time[i]);
+        if (!Number.isFinite(ts)) continue;
+
+        for (const model of CONFIG.openMeteoModels) {
+            const prob = hourly[`precipitation_probability_${model.apiKey}`]?.[i];
+            const precip = hourly[`precipitation_${model.apiKey}`]?.[i];
+            const hasProb = Number.isFinite(prob);
+            const hasPrecip = Number.isFinite(precip);
+
+            if (hasProb || hasPrecip) {
+                maps[model.id].set(ts, {
+                    probability: hasProb ? prob : null,
+                    precipitationMm: hasPrecip ? precip : null,
+                });
+            }
+        }
+    }
+
+    return maps;
+}
+
+function parseWeatherNext3Forecast(raw) {
+    const map = new Map();
+    const hourly = raw?.hourly;
+    if (!hourly || !Array.isArray(hourly.time)) return map;
+
+    for (let i = 0; i < hourly.time.length; i++) {
+        const ts = parseUtcHourTimestamp(hourly.time[i]);
+        if (!Number.isFinite(ts)) continue;
+
+        const mean = hourly.precipitation?.[i];
+        const probability = estimateProbabilityFromPercentiles({
+            p10: hourly.precipitation_p10?.[i],
+            p25: hourly.precipitation_p25?.[i],
+            p50: hourly.precipitation_p50?.[i],
+            p75: hourly.precipitation_p75?.[i],
+            p90: hourly.precipitation_p90?.[i],
+            mean,
         });
+        const precipitationMm = Number.isFinite(mean) ? mean : null;
+
+        if (probability !== null || precipitationMm !== null) {
+            map.set(ts, { probability, precipitationMm });
+        }
+    }
+
+    return map;
+}
+
+function parseNWSForecast(raw) {
+    const map = new Map();
+    const periods = raw?.properties?.periods;
+    if (!Array.isArray(periods)) return map;
+
+    for (const period of periods) {
+        const ts = Date.parse(period.startTime);
+        if (!Number.isFinite(ts)) continue;
+        const probValue = period.probabilityOfPrecipitation?.value;
+        map.set(ts, {
+            probability: Number.isFinite(probValue) ? probValue : 0,
+            precipitationMm: null,
+        });
+    }
+
+    return map;
+}
+
+function buildForecastSeries(modelMaps, options) {
+    const {
+        now = new Date(),
+        forecastHours,
+        threshold,
+        alpha,
+        unitSystem,
+        is24HourFormat,
+    } = options;
+
+    const hourMs = 3600 * 1000;
+    const startUtcMs = Math.floor(now.getTime() / hourMs) * hourMs;
+    const timestamps = Array.from({ length: forecastHours }, (_, i) => startUtcMs + i * hourMs);
+
+    const activeModels = [];
+    const modelSeries = {};
+
+    for (const cfg of MODEL_CONFIGS) {
+        const modelMap = modelMaps[cfg.id];
+        const series = timestamps.map((ts) => {
+            const point = modelMap?.get(ts);
+            return point && Number.isFinite(point.probability) ? point.probability : NaN;
+        });
+        modelSeries[cfg.id] = series;
+
+        const hasAnyData = timestamps.some((ts) => {
+            const point = modelMap?.get(ts);
+            return point && (Number.isFinite(point.probability) || Number.isFinite(point.precipitationMm));
+        });
+        if (hasAnyData) {
+            activeModels.push(cfg);
+        }
+    }
+
+    const labels = [];
+    const ensembleAverage = [];
+    const forecastAmount = [];
+    const confidence = { upper: [], lower: [] };
+    let firstWarning = null;
+
+    for (let i = 0; i < timestamps.length; i++) {
+        const ts = timestamps[i];
+        const forecastTime = new Date(ts);
+        labels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
+
+        const probabilities = [];
+        const precipitationsMm = [];
+
+        for (const cfg of activeModels) {
+            const point = modelMaps[cfg.id]?.get(ts);
+            if (!point) continue;
+            if (Number.isFinite(point.probability)) probabilities.push(point.probability);
+            if (Number.isFinite(point.precipitationMm)) precipitationsMm.push(point.precipitationMm);
+        }
+
+        const probAvg = probabilities.length > 0
+            ? probabilities.reduce((sum, val) => sum + val, 0) / probabilities.length
+            : 0;
+        ensembleAverage.push(probAvg);
+
+        const precipAvgMm = precipitationsMm.length > 0
+            ? precipitationsMm.reduce((sum, val) => sum + val, 0) / precipitationsMm.length
+            : 0;
+        forecastAmount.push(unitSystem === 'imperial' ? precipAvgMm / CONFIG.mmPerInch : precipAvgMm);
+
+        if (probabilities.length > 1) {
+            const sorted = [...probabilities].sort((a, b) => a - b);
+            confidence.lower.push(getQuantile(sorted, alpha));
+            confidence.upper.push(getQuantile(sorted, 1 - alpha));
+        } else {
+            const singleVal = probabilities[0] ?? 0;
+            confidence.lower.push(singleVal);
+            confidence.upper.push(singleVal);
+        }
+
+        if (!firstWarning && probAvg >= threshold) {
+            firstWarning = { probability: Math.round(probAvg), time: forecastTime };
+        }
+    }
+
+    return {
+        labels,
+        activeModels,
+        ensembleAverage,
+        modelSeries,
+        confidence,
+        forecastAmount,
+        firstWarning,
+    };
+}
+
+// --- Browser Application Controller ---
+
+function initApp() {
+    // Register service worker immediately (not nested inside window.onload)
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js')
+            .catch((err) => console.warn('Service Worker registration failed:', err));
+    }
+
+    // --- DOM Elements ---
+    const dom = {
+        weatherInfo: document.getElementById('weather-info'),
+        warningMessage: document.getElementById('warning-message'),
+        lastUpdated: document.getElementById('last-updated'),
+        notificationStatus: document.getElementById('notification-status'),
+        locationForm: document.getElementById('location-form'),
+        locationInput: document.getElementById('location-input'),
+        locationDisplay: document.getElementById('location-display'),
+        gpsButton: document.getElementById('gps-button'),
+        chartCanvas: document.getElementById('rainChart'),
+        thresholdInput: document.getElementById('threshold-input'),
+        forecastHoursInput: document.getElementById('forecast-hours-input'),
+        timeFormatToggle: document.getElementById('time-format-toggle'),
+        confidenceToggle: document.getElementById('confidence-toggle'),
+        showEnsembleToggle: document.getElementById('show-ensemble-toggle'),
+        showAmountToggle: document.getElementById('show-amount-toggle'),
+        alphaInput: document.getElementById('alpha-input'),
+        unitSystemSelect: document.getElementById('unit-system-select'),
+        dataSource: document.getElementById('data-source'),
+        installButton: document.getElementById('install-button'),
+    };
+
+    // --- App State ---
+    const state = {
+        latitude: null,
+        longitude: null,
+        locationName: '',
+        threshold: CONFIG.defaults.threshold,
+        forecastHours: CONFIG.defaults.forecastHours,
+        alpha: CONFIG.defaults.alpha,
+        unitSystem: CONFIG.defaults.unitSystem,
+        is24HourFormat: CONFIG.defaults.is24HourFormat,
+        showConfidenceBounds: CONFIG.defaults.showConfidenceBounds,
+        showEnsembleMembers: CONFIG.defaults.showEnsembleMembers,
+        showExpectedAmount: CONFIG.defaults.showExpectedAmount,
+        lastModelMaps: null,
+        lastFetchedAt: null,
+        lastNotifiedKey: null,
+        refreshTimerId: null,
+        activeAbortController: null,
+        rainChart: null,
+        deferredInstallPrompt: null,
+    };
+
+    // --- Safe Storage Helpers ---
+    function readStorage(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    }
+
+    function writeStorage(key, value) {
+        try {
+            localStorage.setItem(key, String(value));
+        } catch {
+            // Ignore storage quota / privacy mode errors
+        }
     }
 
     // --- PWA Install Prompt ---
-    let deferredPrompt;
-    const installButton = document.getElementById('install-button');
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        if (installButton) installButton.style.display = 'block';
+    window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        state.deferredInstallPrompt = event;
+        if (dom.installButton) dom.installButton.style.display = 'block';
     });
-    if (installButton) {
-        installButton.addEventListener('click', async () => {
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                installButton.style.display = 'none';
-            }
+
+    if (dom.installButton) {
+        dom.installButton.addEventListener('click', async () => {
+            if (!state.deferredInstallPrompt) return;
+            state.deferredInstallPrompt.prompt();
+            await state.deferredInstallPrompt.userChoice;
+            state.deferredInstallPrompt = null;
+            dom.installButton.style.display = 'none';
         });
     }
 
-    // --- Configuration ---
-    const REFRESH_INTERVAL = 1200000; // 20 minutes
-    const WEATHER_MODELS = 'gfs_seamless,ecmwf_ifs,icon_seamless';
+    // --- Chart Management ---
+    function getDataset(id) {
+        return state.rainChart?.data.datasets.find((ds) => ds.id === id) ?? null;
+    }
 
-    // --- DOM Elements ---
-    const weatherInfoDiv = document.getElementById('weather-info');
-    const warningMessageDiv = document.getElementById('warning-message');
-    const lastUpdatedSpan = document.getElementById('last-updated');
-    const notificationStatusSpan = document.getElementById('notification-status');
-    const locationForm = document.getElementById('location-form');
-    const locationInput = document.getElementById('location-input');
-    const locationDisplay = document.getElementById('location-display');
-    const gpsButton = document.getElementById('gps-button');
-    const chartCanvas = document.getElementById('rainChart');
-    const thresholdInput = document.getElementById('threshold-input');
-    const forecastHoursInput = document.getElementById('forecast-hours-input');
-    const timeFormatToggle = document.getElementById('time-format-toggle');
-    const confidenceToggle = document.getElementById('confidence-toggle');
-    const showEnsembleToggle = document.getElementById('show-ensemble-toggle');
-    const showAmountToggle = document.getElementById('show-amount-toggle');
-    const alphaInput = document.getElementById('alpha-input');
-    const unitSystemSelect = document.getElementById('unit-system-select');
-    const dataSourceP = document.getElementById('data-source');
+    function syncDatasetVisibility(updateMode) {
+        if (!state.rainChart) return;
 
-    // --- App State ---
-    let currentLatitude, currentLongitude;
-    let weatherInterval;
-    let rainChart;
-    let rainProbabilityThreshold = 25;
-    let forecastHours = 12;
-    let is24HourFormat = false;
-    let showConfidenceBounds = false;
-    let showEnsembleMembers = false;
-    let showExpectedAmount = false;
-    let unitSystem = 'metric';
-    let alpha = 0.25;
-    let lastEnsembleData = null;
-    let processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
+        const upper = getDataset(DATASET_IDS.confidenceUpper);
+        const lower = getDataset(DATASET_IDS.confidenceLower);
+        const amount = getDataset(DATASET_IDS.forecastAmount);
 
-    // --- Chart Functions ---
+        if (upper) upper.hidden = !state.showConfidenceBounds;
+        if (lower) lower.hidden = !state.showConfidenceBounds;
+        if (amount) amount.hidden = !state.showExpectedAmount;
+
+        state.rainChart.options.scales.y1.display = state.showExpectedAmount;
+        state.rainChart.update(updateMode);
+    }
+
     function initializeChart() {
-        if (!chartCanvas) return;
-        const ctx = chartCanvas.getContext('2d');
-        
-        // Chart.js Default styling tweaks for Dark Mode Overlay
+        if (!dom.chartCanvas || typeof Chart === 'undefined') return;
+        const ctx = dom.chartCanvas.getContext('2d');
+
         Chart.defaults.color = '#94a3b8';
         Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.05)';
 
-        rainChart = new Chart(ctx, {
+        const modelDatasets = MODEL_CONFIGS.map((cfg) => ({
+            id: `${DATASET_IDS.modelPrefix}${cfg.id}`,
+            modelId: cfg.id,
+            label: cfg.label,
+            data: [],
+            yAxisID: 'y',
+            type: 'line',
+            borderColor: cfg.color,
+            backgroundColor: cfg.color,
+            borderWidth: 1.75,
+            tension: 0.25,
+            fill: false,
+            pointRadius: 0,
+            order: 1,
+            hidden: true,
+        }));
+
+        state.rainChart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: [],
                 datasets: [
-                    { label: 'Ensemble Avg', data: [], yAxisID: 'y', backgroundColor: 'rgba(56, 189, 248, 0.4)', borderColor: 'rgba(56, 189, 248, 1)', borderWidth: 1, order: 2 },
-                    { label: 'GFS', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 1.5, fill: false, pointRadius: 0, order: 1 },
-                    { label: 'ECMWF', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(249, 115, 22, 0.5)', borderWidth: 1.5, fill: false, pointRadius: 0, order: 1 },
-                    { label: 'ICON', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(139, 92, 246, 0.5)', borderWidth: 1.5, fill: false, pointRadius: 0, order: 1 },
-                    { label: 'NWS', data: [], yAxisID: 'y', type: 'line', borderColor: 'rgba(244, 63, 94, 0.5)', borderWidth: 1.5, fill: false, pointRadius: 0, order: 1 },
                     {
+                        id: DATASET_IDS.ensembleAvg,
+                        label: 'Ensemble Avg',
+                        data: [],
+                        yAxisID: 'y',
+                        backgroundColor: 'rgba(56, 189, 248, 0.4)',
+                        borderColor: 'rgba(56, 189, 248, 1)',
+                        borderWidth: 1,
+                        order: 2,
+                    },
+                    ...modelDatasets,
+                    {
+                        id: DATASET_IDS.confidenceUpper,
                         label: 'Confidence Bound',
-                        data: [], // Upper bound
+                        data: [],
                         yAxisID: 'y',
                         fill: '+1',
-                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.06)',
                         borderColor: 'transparent',
                         pointRadius: 0,
                         type: 'line',
-                        order: 0
+                        order: 0,
+                        hidden: true,
                     },
                     {
+                        id: DATASET_IDS.confidenceLower,
                         label: 'Lower Bound',
-                        data: [], // Lower bound
+                        data: [],
                         yAxisID: 'y',
                         fill: false,
                         borderColor: 'transparent',
                         pointRadius: 0,
-                        type: 'line'
+                        type: 'line',
+                        hidden: true,
                     },
                     {
+                        id: DATASET_IDS.forecastAmount,
                         label: 'Forecast Amount',
                         data: [],
                         yAxisID: 'y1',
                         backgroundColor: 'rgba(250, 204, 21, 0.4)',
                         borderColor: 'rgba(250, 204, 21, 1)',
                         borderWidth: 1,
-                        order: 3
-                    }
-                ]
+                        order: 3,
+                        hidden: true,
+                    },
+                ],
             },
             options: {
                 maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
                 scales: {
-                    y: { type: 'linear', position: 'left', beginAtZero: true, max: 100, grid: { color: 'rgba(255, 255, 255, 0.03)' }, title: { display: true, text: 'Rain Probability (%)', color: '#f8fafc' } },
-                    y1: { type: 'linear', position: 'right', beginAtZero: true, title: { display: true, text: 'Forecast Amount (mm)', color: '#f8fafc' }, grid: { drawOnChartArea: false } },
-                    x: { grid: { display: false } }
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                        title: { display: true, text: 'Rain Probability (%)', color: '#f8fafc' },
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        display: false,
+                        beginAtZero: true,
+                        title: { display: true, text: 'Forecast Amount (mm)', color: '#f8fafc' },
+                        grid: { drawOnChartArea: false },
+                    },
+                    x: { grid: { display: false } },
                 },
                 plugins: {
+                    tooltip: {
+                        filter: (item) => item.dataset.id !== DATASET_IDS.confidenceLower,
+                        callbacks: {
+                            label: (context) => {
+                                const value = context.parsed.y;
+                                if (!Number.isFinite(value)) return null;
+                                if (context.dataset.id === DATASET_IDS.forecastAmount) {
+                                    const unit = state.unitSystem === 'imperial' ? 'in' : 'mm';
+                                    const decimals = state.unitSystem === 'imperial' ? 3 : 2;
+                                    return `${context.dataset.label}: ${value.toFixed(decimals)} ${unit}`;
+                                }
+                                if (context.dataset.id === DATASET_IDS.confidenceUpper) {
+                                    const lowerVal = getDataset(DATASET_IDS.confidenceLower)?.data?.[context.dataIndex];
+                                    if (Number.isFinite(lowerVal)) {
+                                        return `${context.dataset.label}: ${Math.round(lowerVal)}%–${Math.round(value)}%`;
+                                    }
+                                }
+                                return `${context.dataset.label}: ${Math.round(value)}%`;
+                            },
+                        },
+                    },
                     legend: {
                         display: true,
                         position: 'bottom',
-                        labels: { boxWidth: 10, padding: 15, font: { size: 10 } },
-                        onClick: (e, legendItem, legend) => {
+                        labels: { boxWidth: 10, padding: 14, font: { size: 10 } },
+                        onClick: (event, legendItem, legend) => {
                             const chart = legend.chart;
-                            if (legendItem.text === 'Confidence Bound') {
-                                showConfidenceBounds = !showConfidenceBounds;
-                                if (confidenceToggle) confidenceToggle.checked = showConfidenceBounds;
-                                
-                                const hideBounds = !showConfidenceBounds;
-                                chart.data.datasets[5].hidden = hideBounds;
-                                chart.data.datasets[6].hidden = hideBounds;
-                            } else {
-                                Chart.defaults.plugins.legend.onClick.call(chart, e, legendItem, legend);
+                            const dataset = chart.data.datasets[legendItem.datasetIndex];
+                            if (!dataset) return;
+
+                            if (dataset.id === DATASET_IDS.confidenceUpper) {
+                                state.showConfidenceBounds = !state.showConfidenceBounds;
+                                writeStorage(STORAGE_KEYS.showConfidenceBounds, state.showConfidenceBounds);
+                                if (dom.confidenceToggle) dom.confidenceToggle.checked = state.showConfidenceBounds;
+                                syncDatasetVisibility();
+                                return;
                             }
-                            chart.update();
-                        }
+
+                            if (dataset.id === DATASET_IDS.forecastAmount) {
+                                state.showExpectedAmount = !state.showExpectedAmount;
+                                writeStorage(STORAGE_KEYS.showExpectedAmount, state.showExpectedAmount);
+                                if (dom.showAmountToggle) dom.showAmountToggle.checked = state.showExpectedAmount;
+                                syncDatasetVisibility();
+                                return;
+                            }
+
+                            Chart.defaults.plugins.legend.onClick.call(chart, event, legendItem, legend);
+                        },
                     },
                     annotation: {
                         annotations: {
-                            thresholdLine: { type: 'line', yMin: rainProbabilityThreshold, yMax: rainProbabilityThreshold, borderColor: 'rgba(244, 63, 94, 0.8)', borderWidth: 2, borderDash: [4, 4], scaleID: 'y' }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function updateChart(labels, ensembleData, modelData, confidenceData, forecastAmountData, activeModels) {
-        if (!rainChart) initializeChart();
-        if (!rainChart) return;
-        
-        rainChart.options.plugins.legend.labels.filter = (item) => {
-            const label = item.text;
-            if (['Ensemble Avg', 'Confidence Bound', 'Forecast Amount'].includes(label)) return true;
-            if (label === 'Lower Bound') return false;
-            return activeModels.includes(label.toUpperCase()) && showEnsembleMembers;
-        };
-
-        rainChart.data.datasets.forEach(dataset => {
-            const label = dataset.label;
-            if (['Ensemble Avg', 'Confidence Bound', 'Lower Bound', 'Forecast Amount'].includes(label)) return;
-            
-            const isInactive = !activeModels.includes(label.toUpperCase());
-            dataset.hidden = isInactive || !showEnsembleMembers;
-        });
-
-        rainChart.data.labels = labels;
-        rainChart.data.datasets[0].data = ensembleData;
-        rainChart.data.datasets[1].data = modelData.gfs;
-        rainChart.data.datasets[2].data = modelData.ecmwf;
-        rainChart.data.datasets[3].data = modelData.icon;
-        rainChart.data.datasets[4].data = modelData.nws;
-        rainChart.data.datasets[5].data = confidenceData.upper;
-        rainChart.data.datasets[6].data = confidenceData.lower;
-        rainChart.data.datasets[7].data = forecastAmountData;
-        
-        rainChart.data.datasets[5].hidden = !showConfidenceBounds;
-        rainChart.data.datasets[6].hidden = !showConfidenceBounds;
-        rainChart.data.datasets[7].hidden = !showExpectedAmount;
-
-        if (rainChart.options.plugins.annotation) {
-            rainChart.options.plugins.annotation.annotations.thresholdLine.yMin = rainProbabilityThreshold;
-            rainChart.options.plugins.annotation.annotations.thresholdLine.yMax = rainProbabilityThreshold;
-        }
-        
-        const y2Label = unitSystem === 'imperial' ? 'Forecast Amount (in)' : 'Forecast Amount (mm)';
-        rainChart.options.scales.y1.title.text = y2Label;
-
-        rainChart.update();
-    }
-
-    // --- Notification Functions ---
-    function requestNotificationPermission() {
-        if (!("Notification" in window)) {
-            if (notificationStatusSpan) notificationStatusSpan.textContent = 'Not Supported';
-            return;
-        }
-        Notification.requestPermission().then(permission => {
-            if (notificationStatusSpan) notificationStatusSpan.textContent = permission === "granted" ? 'Enabled' : 'Disabled';
-        });
-    }
-    
-    function sendNotification(title, body) {
-        if (Notification.permission === "granted") {
-            navigator.serviceWorker.ready.then(reg => {
-                reg.showNotification(title, { body: body, icon: 'icon.svg' });
-            });
-        }
-    }
-
-    // --- Location Functions ---
-    async function getCoordinatesForLocation(locationName) {
-        setLoadingState('Finding location...');
-        const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
-        try {
-            const response = await fetch(geocodeUrl);
-            const data = await response.json();
-            if (data.results && data.results.length > 0) {
-                const loc = data.results[0];
-                const displayName = `${loc.name}, ${loc.admin1 || loc.country}`;
-                saveAndSetLocation(loc.latitude, loc.longitude, displayName);
-            } else {
-                alert('Location not found.');
-                loadSavedLocation();
-            }
-        } catch (error) {
-            alert('Failed to find location.');
-            loadSavedLocation();
-        }
-    }
-
-    async function getLocationNameForCoordinates(lat, lon) {
-        setLoadingState('Getting location name...');
-        const reverseGeocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=en`;
-        try {
-            const response = await fetch(reverseGeocodeUrl);
-            const data = await response.json();
-            const address = data.address;
-            const displayName = address.city || address.town || address.village || 'Current Location';
-            saveAndSetLocation(lat, lon, displayName);
-        } catch (error) {
-            console.error("Reverse geocoding failed:", error);
-            saveAndSetLocation(lat, lon, `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`);
-        }
-    }
-    
-    function handleGpsClick() {
-        if (navigator.geolocation) {
-            setLoadingState('Getting GPS signal...');
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    getLocationNameForCoordinates(position.coords.latitude, position.coords.longitude);
+                            thresholdLine: {
+                                type: 'line',
+                                yMin: state.threshold,
+                                yMax: state.threshold,
+                                borderColor: 'rgba(244, 63, 94, 0.8)',
+                                borderWidth: 2,
+                                borderDash: [4, 4],
+                                scaleID: 'y',
+                            },
+                        },
+                    },
                 },
-                (error) => {
-                    alert('GPS Error: ' + error.message);
-                    loadSavedLocation();
-                }
-            );
-        } else {
-            alert("Geolocation is not supported by this browser.");
-        }
+            },
+        });
     }
 
-    function saveAndSetLocation(lat, lon, name) {
-        localStorage.setItem('weatherLocation', JSON.stringify({ latitude: lat, longitude: lon, name: name }));
-        updateLocation(lat, lon, name);
-    }
+    function updateChart(series) {
+        if (!state.rainChart) initializeChart();
+        if (!state.rainChart) return;
 
-    function updateLocation(lat, lon, name) {
-        currentLatitude = lat;
-        currentLongitude = lon;
-        if (locationDisplay) locationDisplay.textContent = name;
-        
-        if (weatherInterval) clearInterval(weatherInterval);
-        getEnsembleWeatherData();
-        weatherInterval = setInterval(getEnsembleWeatherData, REFRESH_INTERVAL);
-    }
-
-    function loadSavedLocation() {
-        const savedLocation = localStorage.getItem('weatherLocation');
-        if (savedLocation) {
-            const { latitude, longitude, name } = JSON.parse(savedLocation);
-            updateLocation(latitude, longitude, name);
-        } else {
-            updateLocation(49.2827, -123.1207, 'Vancouver, BC'); 
-        }
-    }
-
-    // --- Weather Data Functions ---
-    async function getNWSForecast(lat, lon) {
-        try {
-            const pointsResponse = await fetch(`https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`);
-            if (!pointsResponse.ok) return null;
-            const pointsData = await pointsResponse.json();
-            const hourlyUrl = pointsData.properties.forecastHourly;
-            if (!hourlyUrl) return null;
-
-            const hourlyResponse = await fetch(hourlyUrl);
-            if (!hourlyResponse.ok) return null;
-            const hourlyData = await hourlyResponse.json();
-            
-            return hourlyData.properties.periods.map(period => ({
-                time: new Date(period.startTime),
-                probability: period.probabilityOfPrecipitation.value || 0
-            }));
-        } catch (error) {
-            return null;
-        }
-    }
-
-    async function getEnsembleWeatherData() {
-        if (currentLatitude === undefined || currentLongitude === undefined) return;
-        setLoadingState('Fetching forecast...');
-
-        const precipUnit = unitSystem === 'imperial' ? 'inch' : 'mm';
-        const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLatitude}&longitude=${currentLongitude}&hourly=precipitation_probability,precipitation&models=${WEATHER_MODELS}&precipitation_unit=${precipUnit}&forecast_days=2`;
-        
-        const [openMeteoResult, nwsResult] = await Promise.allSettled([
-            fetch(openMeteoUrl).then(res => res.json()),
-            getNWSForecast(currentLatitude, currentLongitude)
+        const activeIds = new Set(series.activeModels.map((m) => m.id));
+        const fixedLegendIds = new Set([
+            DATASET_IDS.ensembleAvg,
+            DATASET_IDS.confidenceUpper,
+            DATASET_IDS.forecastAmount,
         ]);
 
-        if (openMeteoResult.status === 'rejected') {
+        state.rainChart.options.plugins.legend.labels.filter = (item, chartData) => {
+            const ds = chartData.datasets[item.datasetIndex];
+            if (!ds) return false;
+            if (fixedLegendIds.has(ds.id)) return true;
+            if (ds.id === DATASET_IDS.confidenceLower) return false;
+            return state.showEnsembleMembers && activeIds.has(ds.modelId);
+        };
+
+        state.rainChart.data.labels = series.labels;
+        getDataset(DATASET_IDS.ensembleAvg).data = series.ensembleAverage;
+        getDataset(DATASET_IDS.confidenceUpper).data = series.confidence.upper;
+        getDataset(DATASET_IDS.confidenceLower).data = series.confidence.lower;
+        getDataset(DATASET_IDS.forecastAmount).data = series.forecastAmount;
+
+        for (const cfg of MODEL_CONFIGS) {
+            const ds = getDataset(`${DATASET_IDS.modelPrefix}${cfg.id}`);
+            if (!ds) continue;
+            ds.data = series.modelSeries[cfg.id] || [];
+            ds.hidden = !state.showEnsembleMembers || !activeIds.has(cfg.id);
+        }
+
+        const thresholdLine = state.rainChart.options.plugins.annotation?.annotations?.thresholdLine;
+        if (thresholdLine) {
+            thresholdLine.yMin = state.threshold;
+            thresholdLine.yMax = state.threshold;
+        }
+
+        const precipUnitLabel = state.unitSystem === 'imperial' ? 'in' : 'mm';
+        state.rainChart.options.scales.y1.title.text = `Forecast Amount (${precipUnitLabel})`;
+
+        syncDatasetVisibility();
+    }
+
+    // --- Notifications ---
+    function requestNotificationPermission() {
+        if (!('Notification' in window)) {
+            if (dom.notificationStatus) dom.notificationStatus.textContent = 'Not Supported';
+            return;
+        }
+
+        if (Notification.permission === 'granted') {
+            if (dom.notificationStatus) dom.notificationStatus.textContent = 'Enabled';
+            return;
+        }
+
+        Notification.requestPermission().then((permission) => {
+            if (dom.notificationStatus) {
+                dom.notificationStatus.textContent = permission === 'granted' ? 'Enabled' : 'Disabled';
+            }
+        });
+    }
+
+    function sendNotification(title, body, dedupeKey) {
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+        if (dedupeKey && state.lastNotifiedKey === dedupeKey) return;
+        state.lastNotifiedKey = dedupeKey ?? null;
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready
+                .then((reg) => reg.showNotification(title, { body, icon: 'icon-192.png' }))
+                .catch(() => {});
+        }
+    }
+
+    // --- UI Feedback ---
+    function setLoadingState(message) {
+        if (dom.weatherInfo) {
+            dom.weatherInfo.classList.remove('hidden');
+            const textEl = dom.weatherInfo.querySelector('.loading-text');
+            if (textEl) {
+                textEl.textContent = message;
+            } else {
+                dom.weatherInfo.textContent = message;
+            }
+        }
+        if (dom.warningMessage) {
+            dom.warningMessage.classList.add('hidden');
+        }
+    }
+
+    function hideLoadingState() {
+        if (dom.weatherInfo) dom.weatherInfo.classList.add('hidden');
+    }
+
+    function showStatusBanner(type, contentFn) {
+        if (!dom.warningMessage) return;
+        dom.warningMessage.className = type;
+        dom.warningMessage.textContent = '';
+        contentFn(dom.warningMessage);
+    }
+
+    function handleFetchError(message) {
+        hideLoadingState();
+        document.body.classList.remove('state-warning');
+        showStatusBanner('warning', (el) => {
+            el.textContent = message;
+        });
+    }
+
+    function displayWarning(probability, time, shouldNotify) {
+        const formattedTime = time.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: !state.is24HourFormat,
+        });
+
+        showStatusBanner('warning', (el) => {
+            const strongWarn = document.createElement('strong');
+            strongWarn.textContent = 'Warning! ';
+            const strongTime = document.createElement('strong');
+            strongTime.textContent = formattedTime;
+            el.append(strongWarn, `${probability}% chance of rain around `, strongTime);
+        });
+        document.body.classList.add('state-warning');
+
+        if (shouldNotify) {
+            const key = `${state.locationName}|${time.toISOString()}|${state.threshold}`;
+            sendNotification(
+                'Rain Warning',
+                `Warning! ${probability}% chance of rain around ${formattedTime}.`,
+                key
+            );
+        }
+    }
+
+    function displaySafeMessage() {
+        showStatusBanner('safe', (el) => {
+            el.textContent = `No significant rain risk (≥${state.threshold}%) in the next ${state.forecastHours}h.`;
+        });
+        document.body.classList.remove('state-warning');
+        state.lastNotifiedKey = null;
+    }
+
+    // --- Network Fetchers ---
+    async function fetchJson(url, signal) {
+        const response = await fetch(url, { signal });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    }
+
+    async function fetchOpenMeteoForecast(lat, lon, signal) {
+        const modelsParam = CONFIG.openMeteoModels.map((m) => m.apiKey).join(',');
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=precipitation_probability,precipitation&models=${modelsParam}&precipitation_unit=mm&forecast_days=2`;
+        const data = await fetchJson(url, signal);
+        if (data.error) throw new Error(data.reason || 'Open-Meteo API error');
+        return parseOpenMeteoForecast(data);
+    }
+
+    async function fetchWeatherNext3Forecast(lat, lon, signal) {
+        const hourlyVars = [
+            'precipitation',
+            'precipitation_p10',
+            'precipitation_p25',
+            'precipitation_p50',
+            'precipitation_p75',
+            'precipitation_p90',
+        ].join(',');
+        const url = `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${lat}&longitude=${lon}&hourly=${hourlyVars}&models=${CONFIG.weatherNext3Model}&precipitation_unit=mm&forecast_days=2`;
+        const data = await fetchJson(url, signal);
+        if (data.error) throw new Error(data.reason || 'WeatherNext 3 API error');
+        return parseWeatherNext3Forecast(data);
+    }
+
+    async function fetchNWSForecast(lat, lon, signal) {
+        const pointsData = await fetchJson(
+            `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`,
+            signal
+        );
+        const hourlyUrl = pointsData?.properties?.forecastHourly;
+        if (!hourlyUrl) return new Map();
+
+        const hourlyData = await fetchJson(hourlyUrl, signal);
+        return parseNWSForecast(hourlyData);
+    }
+
+    async function refreshWeatherData() {
+        if (!Number.isFinite(state.latitude) || !Number.isFinite(state.longitude)) return;
+
+        if (state.activeAbortController) {
+            state.activeAbortController.abort();
+        }
+        const controller = new AbortController();
+        state.activeAbortController = controller;
+
+        setLoadingState('Fetching ensemble forecast...');
+
+        const [openMeteoResult, weatherNext3Result, nwsResult] = await Promise.allSettled([
+            fetchOpenMeteoForecast(state.latitude, state.longitude, controller.signal),
+            fetchWeatherNext3Forecast(state.latitude, state.longitude, controller.signal),
+            fetchNWSForecast(state.latitude, state.longitude, controller.signal),
+        ]);
+
+        // Ignore superseded requests
+        if (controller.signal.aborted) return;
+
+        const openMeteoMaps = openMeteoResult.status === 'fulfilled' ? openMeteoResult.value : {};
+        const modelMaps = {
+            gfs: openMeteoMaps.gfs ?? new Map(),
+            ecmwf: openMeteoMaps.ecmwf ?? new Map(),
+            icon: openMeteoMaps.icon ?? new Map(),
+            weathernext3: weatherNext3Result.status === 'fulfilled' ? weatherNext3Result.value : new Map(),
+            nws: nwsResult.status === 'fulfilled' ? nwsResult.value : new Map(),
+        };
+
+        const hasAnyData = Object.values(modelMaps).some((map) => map.size > 0);
+        if (!hasAnyData) {
             handleFetchError('Could not retrieve weather data.');
             return;
         }
 
-        lastEnsembleData = {
-            openMeteo: openMeteoResult.value,
-            nws: nwsResult.status === 'fulfilled' ? nwsResult.value : null
-        };
+        state.lastModelMaps = modelMaps;
+        state.lastFetchedAt = new Date();
+        renderForecast({ notify: true });
+    }
 
-        if (lastEnsembleData.openMeteo.error) {
-            handleFetchError(`API Error: ${lastEnsembleData.openMeteo.reason}`);
+    function renderForecast({ notify = false } = {}) {
+        if (!state.lastModelMaps) return;
+        hideLoadingState();
+
+        const now = state.lastFetchedAt ?? new Date();
+        const series = buildForecastSeries(state.lastModelMaps, {
+            now,
+            forecastHours: state.forecastHours,
+            threshold: state.threshold,
+            alpha: state.alpha,
+            unitSystem: state.unitSystem,
+            is24HourFormat: state.is24HourFormat,
+        });
+
+        if (dom.dataSource) {
+            const names = series.activeModels.map((m) => m.label);
+            dom.dataSource.textContent = `Sources: ${names.join(', ') || 'None'}`;
+        }
+
+        if (series.firstWarning) {
+            displayWarning(series.firstWarning.probability, series.firstWarning.time, notify);
+        } else {
+            displaySafeMessage();
+        }
+
+        updateChart(series);
+
+        if (dom.lastUpdated) {
+            dom.lastUpdated.textContent = now.toLocaleTimeString([], { hour12: !state.is24HourFormat });
+        }
+    }
+
+    // --- Location Management ---
+    function saveAndSetLocation(lat, lon, name) {
+        writeStorage(STORAGE_KEYS.location, JSON.stringify({ latitude: lat, longitude: lon, name }));
+        setLocation(lat, lon, name);
+    }
+
+    function setLocation(lat, lon, name) {
+        state.latitude = lat;
+        state.longitude = lon;
+        state.locationName = name;
+        state.lastNotifiedKey = null;
+
+        if (dom.locationDisplay) dom.locationDisplay.textContent = name;
+
+        if (state.refreshTimerId) clearInterval(state.refreshTimerId);
+        refreshWeatherData();
+        state.refreshTimerId = setInterval(refreshWeatherData, CONFIG.refreshIntervalMs);
+    }
+
+    function loadSavedLocation() {
+        const raw = readStorage(STORAGE_KEYS.location);
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Number.isFinite(parsed?.latitude) && Number.isFinite(parsed?.longitude) && parsed?.name) {
+                    setLocation(parsed.latitude, parsed.longitude, parsed.name);
+                    return;
+                }
+            } catch {
+                // Fall back to default location on malformed storage
+            }
+        }
+        const { latitude, longitude, name } = CONFIG.defaultLocation;
+        setLocation(latitude, longitude, name);
+    }
+
+    async function searchLocation(locationName) {
+        setLoadingState('Finding location...');
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationName)}&count=1&language=en&format=json`;
+        try {
+            const data = await fetchJson(url);
+            const loc = data.results?.[0];
+            if (!loc) {
+                handleFetchError(`Location "${locationName}" not found.`);
+                return;
+            }
+            const region = loc.admin1 || loc.country;
+            const displayName = region ? `${loc.name}, ${region}` : loc.name;
+            saveAndSetLocation(loc.latitude, loc.longitude, displayName);
+        } catch {
+            handleFetchError('Failed to look up location.');
+        }
+    }
+
+    async function reverseGeocode(lat, lon) {
+        setLoadingState('Getting location name...');
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=en`;
+        try {
+            const data = await fetchJson(url);
+            const address = data.address;
+            const displayName = address?.city || address?.town || address?.village || 'Current Location';
+            saveAndSetLocation(lat, lon, displayName);
+        } catch (error) {
+            console.warn('Reverse geocoding failed:', error);
+            saveAndSetLocation(lat, lon, `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`);
+        }
+    }
+
+    function handleGpsClick() {
+        if (!navigator.geolocation) {
+            handleFetchError('Geolocation is not supported by this browser.');
             return;
         }
-        
-        processEnsembleData(lastEnsembleData);
+        setLoadingState('Getting GPS signal...');
+        navigator.geolocation.getCurrentPosition(
+            (position) => reverseGeocode(position.coords.latitude, position.coords.longitude),
+            (error) => handleFetchError(`GPS Error: ${error.message}`)
+        );
     }
 
-    function getQuantile(sortedArray, q) {
-        const pos = (sortedArray.length - 1) * q;
-        const base = Math.floor(pos);
-        const rest = pos - base;
-        return sortedArray[base + 1] !== undefined ? sortedArray[base] + rest * (sortedArray[base + 1] - sortedArray[base]) : sortedArray[base];
-    }
-
-    function processEnsembleData(data) {
-        if (!data || !data.openMeteo || !data.openMeteo.hourly || !data.openMeteo.hourly.time) {
-            handleFetchError('Invalid data format.');
-            return;
-        }
-        if (weatherInfoDiv) weatherInfoDiv.style.display = 'none';
-        
-        const now = new Date();
-        let rainChanceFound = false;
-        
-        const chartLabels = [];
-        processedModelData = { gfs: [], ecmwf: [], icon: [], nws: [] };
-        const activeModels = [];
-        const ensembleAverageData = [];
-        const forecastAmountData = [];
-        const confidenceData = { upper: [], lower: [] };
-        
-        const hourly = data.openMeteo.hourly;
-        const timeData = hourly.time;
-        
-        const gfsProbs = hourly.precipitation_probability_gfs_seamless;
-        const ecmwfProbs = hourly.precipitation_probability_ecmwf_ifs;
-        const iconProbs = hourly.precipitation_probability_icon_seamless;
-
-        const gfsPrecip = hourly.precipitation_gfs_seamless;
-        const ecmwfPrecip = hourly.precipitation_ecmwf_ifs;
-        const iconPrecip = hourly.precipitation_icon_seamless;
-
-        let startIndex = timeData.findLastIndex(timeStr => new Date(timeStr + 'Z') <= now);
-        if (startIndex === -1) startIndex = 0;
-
-        if (gfsProbs && gfsProbs.some(p => p !== null)) activeModels.push('GFS');
-        if (ecmwfProbs && ecmwfProbs.some(p => p !== null)) activeModels.push('ECMWF');
-        if (iconProbs && iconProbs.some(p => p !== null)) activeModels.push('ICON');
-        if (data.nws && data.nws.some(p => p.probability !== null)) activeModels.push('NWS');
-        if (dataSourceP) dataSourceP.innerHTML = `Sources: ${activeModels.join(', ') || 'None'}`;
-
-        for (let i = 0; i < forecastHours; i++) {
-            const dataIndex = startIndex + i;
-            if (dataIndex >= timeData.length) continue;
-
-            const forecastTime = new Date(timeData[dataIndex] + 'Z');
-            chartLabels.push(forecastTime.toLocaleTimeString([], { hour: 'numeric', hour12: !is24HourFormat }));
-            
-            const probabilities = [];
-            const precipitations = [];
-
-            const gfsProb = gfsProbs && gfsProbs[dataIndex] != null ? gfsProbs[dataIndex] : NaN;
-            processedModelData.gfs[i] = gfsProb;
-            if (activeModels.includes('GFS') && !isNaN(gfsProb)) probabilities.push(gfsProb);
-            
-            const gfsPrecipVal = gfsPrecip && gfsPrecip[dataIndex] != null ? gfsPrecip[dataIndex] : NaN;
-            if (activeModels.includes('GFS') && !isNaN(gfsPrecipVal)) precipitations.push(gfsPrecipVal);
-
-            const ecmwfProb = ecmwfProbs && ecmwfProbs[dataIndex] != null ? ecmwfProbs[dataIndex] : NaN;
-            processedModelData.ecmwf[i] = ecmwfProb;
-            if (activeModels.includes('ECMWF') && !isNaN(ecmwfProb)) probabilities.push(ecmwfProb);
-
-            const ecmwfPrecipVal = ecmwfPrecip && ecmwfPrecip[dataIndex] != null ? ecmwfPrecip[dataIndex] : NaN;
-            if (activeModels.includes('ECMWF') && !isNaN(ecmwfPrecipVal)) precipitations.push(ecmwfPrecipVal);
-
-            const iconProb = iconProbs && iconProbs[dataIndex] != null ? iconProbs[dataIndex] : NaN;
-            processedModelData.icon[i] = iconProb;
-            if (activeModels.includes('ICON') && !isNaN(iconProb)) probabilities.push(iconProb);
-
-            const iconPrecipVal = iconPrecip && iconPrecip[dataIndex] != null ? iconPrecip[dataIndex] : NaN;
-            if (activeModels.includes('ICON') && !isNaN(iconPrecipVal)) precipitations.push(iconPrecipVal);
-
-            let nwsProb = NaN;
-            if (data.nws) {
-                const nwsPoint = data.nws.find(p => p.time.getTime() === forecastTime.getTime());
-                if (nwsPoint && nwsPoint.probability !== null) nwsProb = nwsPoint.probability;
-            }
-            processedModelData.nws[i] = nwsProb;
-            if (activeModels.includes('NWS') && !isNaN(nwsProb)) probabilities.push(nwsProb);
-            
-            const probAverage = probabilities.length > 0 ? probabilities.reduce((a, b) => a + b, 0) / probabilities.length : 0;
-            ensembleAverageData.push(probAverage);
-
-            const precipAverage = precipitations.length > 0 ? precipitations.reduce((a, b) => a + b, 0) / precipitations.length : 0;
-            forecastAmountData.push(precipAverage);
-
-            if (probabilities.length > 1) {
-                probabilities.sort((a, b) => a - b);
-                confidenceData.lower.push(getQuantile(probabilities, alpha));
-                confidenceData.upper.push(getQuantile(probabilities, 1 - alpha));
-            } else {
-                const val = probabilities[0] || 0;
-                confidenceData.lower.push(val);
-                confidenceData.upper.push(val);
-            }
-
-            if (!rainChanceFound && probAverage >= rainProbabilityThreshold) {
-                displayWarning(Math.round(probAverage), forecastTime);
-                rainChanceFound = true;
-            }
-        }
-        
-        if (!rainChanceFound) displaySafeMessage();
-        updateChart(chartLabels, ensembleAverageData, processedModelData, confidenceData, forecastAmountData, activeModels);
-        if (lastUpdatedSpan) lastUpdatedSpan.textContent = now.toLocaleTimeString([], { hour12: !is24HourFormat });
-    }
-
-    // --- UI Helper Functions ---
-    function setLoadingState(message) {
-        if (!weatherInfoDiv) return;
-        weatherInfoDiv.style.display = 'block';
-        weatherInfoDiv.innerHTML = `<div class="loader"></div><p style="color:var(--text-muted); font-size:0.875rem;">${message}</p>`;
-        if (warningMessageDiv) warningMessageDiv.style.display = 'none';
-    }
-
-    function handleFetchError(message) {
-        if (weatherInfoDiv) weatherInfoDiv.style.display = 'none';
-        if (warningMessageDiv) {
-            warningMessageDiv.textContent = message;
-            warningMessageDiv.className = 'warning';
-            warningMessageDiv.style.display = 'block';
-        }
-    }
-
-    function displayWarning(probability, time) {
-        if (warningMessageDiv) {
-            warningMessageDiv.innerHTML = `<strong>Warning!</strong> ${probability}% chance of rain around <strong>${time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !is24HourFormat })}</strong>`;
-            warningMessageDiv.className = 'warning';
-            warningMessageDiv.style.display = 'block';
-        }
-        document.body.classList.add('state-warning');
-        sendNotification('Rain Warning', `Warning! ${probability}% chance of rain close to ${time.toLocaleTimeString([], { hour: 'numeric' })}.`);
-    }
-
-    function displaySafeMessage() {
-         if (warningMessageDiv) {
-            warningMessageDiv.innerHTML = `No significant rain risks forecasts (≥${rainProbabilityThreshold}%) in the next ${forecastHours}h.`;
-            warningMessageDiv.className = 'safe';
-            warningMessageDiv.style.display = 'block';
-        }
-        document.body.classList.remove('state-warning');
-    }
-
-    // --- Settings Functions ---
+    // --- Settings Persistence & Event Binding ---
     function loadSavedSettings() {
-        if (thresholdInput) {
-            const savedThreshold = localStorage.getItem('rainWarningThreshold');
-            if (savedThreshold) rainProbabilityThreshold = parseInt(savedThreshold, 10);
-            thresholdInput.value = rainProbabilityThreshold;
+        state.threshold = clamp(
+            parseInt(readStorage(STORAGE_KEYS.threshold), 10),
+            CONFIG.limits.threshold.min,
+            CONFIG.limits.threshold.max,
+            CONFIG.defaults.threshold
+        );
+        state.forecastHours = clamp(
+            parseInt(readStorage(STORAGE_KEYS.forecastHours), 10),
+            CONFIG.limits.forecastHours.min,
+            CONFIG.limits.forecastHours.max,
+            CONFIG.defaults.forecastHours
+        );
+        state.alpha = clamp(
+            parseFloat(readStorage(STORAGE_KEYS.alpha)),
+            CONFIG.limits.alpha.min,
+            CONFIG.limits.alpha.max,
+            CONFIG.defaults.alpha
+        );
+        state.is24HourFormat = readStorage(STORAGE_KEYS.is24HourFormat) === 'true';
+        state.showConfidenceBounds = readStorage(STORAGE_KEYS.showConfidenceBounds) === 'true';
+        state.showEnsembleMembers = readStorage(STORAGE_KEYS.showEnsembleMembers) === 'true';
+        state.showExpectedAmount = readStorage(STORAGE_KEYS.showExpectedAmount) === 'true';
+
+        const savedUnit = readStorage(STORAGE_KEYS.unitSystem);
+        state.unitSystem = savedUnit === 'imperial' ? 'imperial' : 'metric';
+
+        if (dom.thresholdInput) dom.thresholdInput.value = state.threshold;
+        if (dom.forecastHoursInput) dom.forecastHoursInput.value = state.forecastHours;
+        if (dom.alphaInput) dom.alphaInput.value = state.alpha;
+        if (dom.timeFormatToggle) dom.timeFormatToggle.checked = state.is24HourFormat;
+        if (dom.confidenceToggle) dom.confidenceToggle.checked = state.showConfidenceBounds;
+        if (dom.showEnsembleToggle) dom.showEnsembleToggle.checked = state.showEnsembleMembers;
+        if (dom.showAmountToggle) dom.showAmountToggle.checked = state.showExpectedAmount;
+        if (dom.unitSystemSelect) dom.unitSystemSelect.value = state.unitSystem;
+    }
+
+    function bindEventListeners() {
+        function bindNumberSetting(el, stateKey, storageKey, parser) {
+            if (!el) return;
+            const { min, max } = CONFIG.limits[stateKey];
+            el.addEventListener('change', () => {
+                state[stateKey] = clamp(parser(el.value), min, max, state[stateKey]);
+                el.value = state[stateKey];
+                writeStorage(storageKey, state[stateKey]);
+                renderForecast();
+            });
         }
 
-        if (forecastHoursInput) {
-            const savedHours = localStorage.getItem('forecastHours');
-            if (savedHours) forecastHours = parseInt(savedHours, 10);
-            forecastHoursInput.value = forecastHours;
+        function bindToggleSetting(el, stateKey, storageKey, onToggle) {
+            if (!el) return;
+            el.addEventListener('change', () => {
+                state[stateKey] = el.checked;
+                writeStorage(storageKey, state[stateKey]);
+                onToggle();
+            });
         }
 
-        if (timeFormatToggle) {
-            is24HourFormat = localStorage.getItem('is24HourFormat') === 'true';
-            timeFormatToggle.checked = is24HourFormat;
+        bindNumberSetting(dom.thresholdInput, 'threshold', STORAGE_KEYS.threshold, (v) => parseInt(v, 10));
+        bindNumberSetting(dom.forecastHoursInput, 'forecastHours', STORAGE_KEYS.forecastHours, (v) => parseInt(v, 10));
+        bindNumberSetting(dom.alphaInput, 'alpha', STORAGE_KEYS.alpha, parseFloat);
+
+        bindToggleSetting(dom.timeFormatToggle, 'is24HourFormat', STORAGE_KEYS.is24HourFormat, () => renderForecast());
+        bindToggleSetting(dom.showEnsembleToggle, 'showEnsembleMembers', STORAGE_KEYS.showEnsembleMembers, () => renderForecast());
+        bindToggleSetting(dom.confidenceToggle, 'showConfidenceBounds', STORAGE_KEYS.showConfidenceBounds, () => syncDatasetVisibility('none'));
+        bindToggleSetting(dom.showAmountToggle, 'showExpectedAmount', STORAGE_KEYS.showExpectedAmount, () => syncDatasetVisibility('none'));
+
+        if (dom.unitSystemSelect) {
+            dom.unitSystemSelect.addEventListener('change', () => {
+                state.unitSystem = dom.unitSystemSelect.value === 'imperial' ? 'imperial' : 'metric';
+                writeStorage(STORAGE_KEYS.unitSystem, state.unitSystem);
+                renderForecast();
+            });
         }
 
-        if (confidenceToggle) {
-            showConfidenceBounds = localStorage.getItem('showConfidenceBounds') === 'true';
-            confidenceToggle.checked = showConfidenceBounds;
+        if (dom.locationForm) {
+            dom.locationForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const query = dom.locationInput?.value.trim();
+                if (query) searchLocation(query);
+            });
         }
 
-        if (showEnsembleToggle) {
-            showEnsembleMembers = localStorage.getItem('showEnsembleMembers') === 'true';
-            showEnsembleToggle.checked = showEnsembleMembers;
-        }
-
-        if (showAmountToggle) {
-            showExpectedAmount = localStorage.getItem('showExpectedAmount') === 'true';
-            showAmountToggle.checked = showExpectedAmount;
-        }
-
-        if (alphaInput) {
-            const savedAlpha = localStorage.getItem('quantileAlpha');
-            if (savedAlpha) alpha = parseFloat(savedAlpha);
-            alphaInput.value = alpha;
-        }
-        
-        if (unitSystemSelect) {
-            const savedUnitSystem = localStorage.getItem('unitSystem') || 'metric';
-            unitSystemSelect.value = savedUnitSystem;
-            unitSystem = savedUnitSystem;
+        if (dom.gpsButton) {
+            dom.gpsButton.addEventListener('click', handleGpsClick);
         }
     }
 
-    // --- Event Handlers ---
-    if (thresholdInput) {
-        thresholdInput.addEventListener('change', () => {
-            rainProbabilityThreshold = parseInt(thresholdInput.value, 10);
-            localStorage.setItem('rainWarningThreshold', rainProbabilityThreshold);
-            if (lastEnsembleData) processEnsembleData(lastEnsembleData);
-        });
-    }
-
-    if (forecastHoursInput) {
-        forecastHoursInput.addEventListener('change', () => {
-            forecastHours = parseInt(forecastHoursInput.value, 10);
-            localStorage.setItem('forecastHours', forecastHours);
-            if (lastEnsembleData) processEnsembleData(lastEnsembleData);
-        });
-    }
-
-    if (timeFormatToggle) {
-        timeFormatToggle.addEventListener('change', () => {
-            is24HourFormat = timeFormatToggle.checked;
-            localStorage.setItem('is24HourFormat', is24HourFormat);
-            if (lastEnsembleData) processEnsembleData(lastEnsembleData);
-        });
-    }
-
-    if (confidenceToggle) {
-        confidenceToggle.addEventListener('change', () => {
-            showConfidenceBounds = confidenceToggle.checked;
-            localStorage.setItem('showConfidenceBounds', showConfidenceBounds);
-            if (rainChart) {
-                rainChart.data.datasets[5].hidden = !showConfidenceBounds;
-                rainChart.data.datasets[6].hidden = !showConfidenceBounds;
-                rainChart.update('none');
-            }
-        });
-    }
-
-    if (showEnsembleToggle) {
-        showEnsembleToggle.addEventListener('change', () => {
-            showEnsembleMembers = showEnsembleToggle.checked;
-            localStorage.setItem('showEnsembleMembers', showEnsembleMembers);
-            if (lastEnsembleData) processEnsembleData(lastEnsembleData);
-        });
-    }
-
-    if (showAmountToggle) {
-        showAmountToggle.addEventListener('change', () => {
-            showExpectedAmount = showAmountToggle.checked;
-            localStorage.setItem('showExpectedAmount', showExpectedAmount);
-            if (rainChart) {
-                rainChart.data.datasets[7].hidden = !showExpectedAmount;
-                rainChart.update('none');
-            }
-        });
-    }
-
-    if (alphaInput) {
-        alphaInput.addEventListener('change', () => {
-            alpha = parseFloat(alphaInput.value);
-            localStorage.setItem('quantileAlpha', alpha);
-            if (lastEnsembleData) processEnsembleData(lastEnsembleData);
-        });
-    }
-
-    if (unitSystemSelect) {
-        unitSystemSelect.addEventListener('change', () => {
-            unitSystem = unitSystemSelect.value;
-            localStorage.setItem('unitSystem', unitSystem);
-            if (currentLatitude !== undefined && currentLongitude !== undefined) getEnsembleWeatherData();
-        });
-    }
-
-    if (locationForm) {
-        locationForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const locationName = locationInput ? locationInput.value.trim() : '';
-            if (locationName) getCoordinatesForLocation(locationName);
-        });
-    }
-
-    if (gpsButton) gpsButton.addEventListener('click', handleGpsClick);
-
-    // --- Initial Operations ---
-    initializeChart();
+    // --- Boot ---
     loadSavedSettings();
+    initializeChart();
+    bindEventListeners();
     requestNotificationPermission();
     loadSavedLocation();
-};
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+        initApp();
+    }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        CONFIG,
+        MODEL_CONFIGS,
+        clamp,
+        getQuantile,
+        estimateProbabilityFromPercentiles,
+        parseUtcHourTimestamp,
+        parseOpenMeteoForecast,
+        parseWeatherNext3Forecast,
+        parseNWSForecast,
+        buildForecastSeries,
+    };
+}

@@ -7,8 +7,6 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon-192.png" type="image/png">
     <meta name="theme-color" content="#0f172a">
-    
-    <!-- Premium Stylesheet -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,14 +20,23 @@
 
             <div class="controls-row">
                 <form id="location-form" class="search-form">
-                    <input type="text" id="location-input" placeholder="Enter a city...">
+                    <input
+                        type="text"
+                        id="location-input"
+                        placeholder="Enter a city..."
+                        aria-label="City name"
+                        autocomplete="off"
+                    >
                     <button type="submit" class="search-btn">Search</button>
                 </form>
-                <button id="gps-button" title="Use My Location" class="icon-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <button type="button" id="gps-button" title="Use My Location" aria-label="Use My Location" class="icon-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
                 </button>
             </div>
-            
+
             <details class="settings-details">
                 <summary>Settings</summary>
                 <div class="settings-grid">
@@ -45,7 +52,7 @@
                         <label for="alpha-input">&alpha; Quantile:</label>
                         <input type="number" id="alpha-input" min="0.01" max="0.5" step="0.01">
                     </div>
-                    
+
                     <div class="setting-item">
                         <label for="unit-system-select">Unit System:</label>
                         <select id="unit-system-select">
@@ -73,28 +80,27 @@
                 </div>
             </details>
 
-            <div id="weather-info">
+            <div id="weather-info" role="status" aria-live="polite">
                 <div class="loader"></div>
-                <p style="color:var(--text-muted); font-size:0.875rem;">Fetching ensemble forecast...</p>
+                <p class="loading-text">Fetching ensemble forecast...</p>
             </div>
 
-            <div id="warning-message" style="display: none;"></div>
-            
+            <div id="warning-message" class="hidden" role="status" aria-live="polite"></div>
+
             <div class="chart-container">
                 <canvas id="rainChart"></canvas>
             </div>
 
-            <button id="install-button">Install App</button>
+            <button type="button" id="install-button">Install App</button>
 
             <div class="footer">
-                <p>Notifications: <span id="notification-status" style="color:var(--color-primary)">Pending</span></p>
+                <p>Notifications: <span id="notification-status" class="status-value">Pending</span></p>
                 <p>Updated: <span id="last-updated">Never</span></p>
             </div>
             <p id="data-source">Weather data sources</p>
         </div>
     </div>
-    
-    <!-- Scripts -->
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <script src="app.js"></script>

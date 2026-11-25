@@ -1,9 +1,9 @@
-/* 
-  Rain Warning Premium stylesheet 
-  Utilizes Glassmorphic principles & Micro-animations
+/*
+  Rain Warning stylesheet
+  Glassmorphic dark UI with dynamic weather warning background
 */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
     --bg-gradient-safe: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #1e293b 100%);
@@ -34,6 +34,10 @@ body {
 
 body.state-warning {
     background: var(--bg-gradient-warning);
+}
+
+.hidden {
+    display: none;
 }
 
 .container {
@@ -69,6 +73,7 @@ body.state-warning {
     font-weight: 800;
     margin: 0 0 0.25rem 0;
     background: linear-gradient(to right, #ffffff, #94a3b8);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
@@ -116,7 +121,7 @@ body.state-warning {
 
 .search-btn {
     background: var(--color-primary);
-    color: #000000;
+    color: #0f172a;
     border: none;
     font-weight: 600;
     padding: 0 1.25rem;
@@ -139,7 +144,7 @@ body.state-warning {
     justify-content: center;
     cursor: pointer;
     color: var(--text-main);
-    transition: all 0.2s;
+    transition: background 0.2s, transform 0.2s;
 }
 
 .icon-btn:hover {
@@ -157,7 +162,6 @@ details.settings-details {
     border: 1px solid var(--glass-border);
     margin-bottom: 1.5rem;
     overflow: hidden;
-    transition: all 0.2s;
 }
 
 details.settings-details summary {
@@ -213,6 +217,12 @@ details.settings-details summary {
     padding: 1.5rem;
 }
 
+.loading-text {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: 0;
+}
+
 .loader {
     border: 3px solid rgba(56, 189, 248, 0.1);
     border-top: 3px solid var(--color-primary);
@@ -261,6 +271,10 @@ details.settings-details summary {
     margin-top: 1.5rem;
 }
 
+.status-value {
+    color: var(--color-primary);
+}
+
 #install-button {
     width: 100%;
     background: var(--text-main);
@@ -283,6 +297,6 @@ details.settings-details summary {
 #data-source {
     text-align: center;
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.35);
     margin-top: 0.5rem;
 }
