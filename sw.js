@@ -1,11 +1,11 @@
 // Service worker for Rain Warning PWA
 
-const CACHE_NAME = 'rain-warning-cache-v9';
+const CACHE_NAME = 'rain-warning-cache-v10';
 const APP_SHELL_URLS = [
     './',
     'index.html',
-    'style.css',
-    'app.js',
+    'style.css?v=10',
+    'app.js?v=10',
     'manifest.json',
     'icon-192.png',
     'icon-512.png',
@@ -45,9 +45,9 @@ self.addEventListener('fetch', (event) => {
     const isSameOrigin = url.origin === self.location.origin;
 
     if (isSameOrigin) {
-        // Network-first for app shell so updates apply immediately, with cache fallback offline.
+        // Network-first with cache revalidation so deploys never mix old JS with new HTML.
         event.respondWith(
-            fetch(event.request)
+            fetch(event.request, { cache: 'no-cache' })
                 .then((response) => {
                     if (response && response.ok && response.type === 'basic') {
                         const copy = response.clone();
@@ -66,4 +66,24 @@ self.addEventListener('fetch', (event) => {
             caches.match(event.request).then((cached) => cached || fetch(event.request))
         );
     }
+});
+
+// Focus an existing Rain Warning window (or open a new one) when a desktop/mobile alert is clicked.
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const targetUrl = new URL('./', self.registration.scope).href;
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+            for (const client of windowClients) {
+                if (client.url.startsWith(targetUrl) && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(targetUrl);
+            }
+            return undefined;
+        })
+    );
 });

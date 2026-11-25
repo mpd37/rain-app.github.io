@@ -752,6 +752,91 @@ summary:focus-visible {
 
 /* --- Responsive --- */
 
+@media (min-width: 960px) {
+    .container {
+        max-width: 1020px;
+        padding: 2rem;
+    }
+
+    .weather-card {
+        display: grid;
+        grid-template-columns: 340px minmax(0, 1fr);
+        grid-template-rows: auto auto auto auto 1fr auto;
+        grid-template-areas:
+            "header   chart"
+            "search   chart"
+            "hero     chart"
+            "settings chart"
+            "install  chart"
+            "footer   footer";
+        column-gap: 2rem;
+        align-items: start;
+        padding: 2rem;
+    }
+
+    .top-bar {
+        grid-area: header;
+    }
+
+    .search-section {
+        grid-area: search;
+        margin-bottom: 1rem;
+    }
+
+    .forecast-hero {
+        grid-area: hero;
+        margin-bottom: 0.25rem;
+        border-bottom: none;
+        padding-bottom: 0.85rem;
+    }
+
+    .chart-section {
+        grid-area: chart;
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        padding-left: 2rem;
+        border-left: 1px solid var(--border-hairline);
+        margin-bottom: 0;
+    }
+
+    .chart-container {
+        height: 360px;
+    }
+
+    details.settings-details {
+        grid-area: settings;
+        margin-bottom: 0;
+    }
+
+    .toggles-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #install-button {
+        grid-area: install;
+        margin-top: 1rem;
+        margin-bottom: 0;
+    }
+
+    .panel-footer {
+        grid-area: footer;
+        margin-top: 1.5rem;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .footer-row {
+        gap: 1.5rem;
+        order: 2;
+    }
+
+    #data-source {
+        order: 1;
+    }
+}
+
 @media (max-width: 520px) {
     body {
         align-items: flex-start;

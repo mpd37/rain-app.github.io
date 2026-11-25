@@ -325,6 +325,9 @@ function buildForecastSeries(modelMaps, options) {
 
 // --- Browser Application Controller ---
 
+let earlyInstallPrompt = null;
+let onInstallPrompt = null;
+
 function initApp() {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js')
@@ -426,10 +429,20 @@ function initApp() {
     }
 
     // --- PWA Install Prompt ---
-    window.addEventListener('beforeinstallprompt', (event) => {
-        event.preventDefault();
-        state.deferredInstallPrompt = event;
+    function showInstallPrompt(promptEvent) {
+        state.deferredInstallPrompt = promptEvent;
         if (dom.installButton) dom.installButton.style.display = 'block';
+    }
+
+    onInstallPrompt = showInstallPrompt;
+    if (earlyInstallPrompt) {
+        showInstallPrompt(earlyInstallPrompt);
+        earlyInstallPrompt = null;
+    }
+
+    window.addEventListener('appinstalled', () => {
+        state.deferredInstallPrompt = null;
+        if (dom.installButton) dom.installButton.style.display = 'none';
     });
 
     if (dom.installButton) {
@@ -484,6 +497,10 @@ function initApp() {
 
     function initializeChart() {
         if (!dom.chartCanvas || typeof Chart === 'undefined') return;
+        const annotationPlugin = window['chartjs-plugin-annotation'];
+        if (annotationPlugin && !Chart.registry.plugins.get('annotation')) {
+            Chart.register(annotationPlugin);
+        }
         const ctx = dom.chartCanvas.getContext('2d');
 
         Chart.defaults.color = '#8295ab';
@@ -683,14 +700,14 @@ function initApp() {
                                 scaleID: 'y',
                                 value: state.threshold,
                                 drawTime: 'afterDatasetsDraw',
-                                borderColor: 'rgba(251, 191, 36, 0.85)',
-                                borderWidth: 1.5,
-                                borderDash: [5, 4],
+                                borderColor: 'rgba(251, 191, 36, 0.9)',
+                                borderWidth: 2,
+                                borderDash: [6, 4],
                                 label: {
                                     display: true,
                                     content: `${state.threshold}%`,
                                     position: 'end',
-                                    backgroundColor: 'rgba(9, 19, 29, 0.9)',
+                                    backgroundColor: 'rgba(9, 19, 29, 0.92)',
                                     color: '#fbbf24',
                                     font: { family: "'JetBrains Mono', monospace", size: 10, weight: 600 },
                                     padding: { x: 6, y: 2 },
@@ -773,11 +790,27 @@ function initApp() {
     }
 
     function requestNotificationPermission() {
-        if (!('Notification' in window) || Notification.permission !== 'default') {
+        if (!('Notification' in window)) {
             syncNotificationStatus();
             return;
         }
-        Notification.requestPermission().then(() => syncNotificationStatus());
+        if (Notification.permission === 'granted') {
+            syncNotificationStatus();
+            state.lastNotifiedKey = null;
+            renderForecast({ notify: true });
+            return;
+        }
+        if (Notification.permission === 'denied') {
+            syncNotificationStatus();
+            return;
+        }
+        Notification.requestPermission().then((permission) => {
+            syncNotificationStatus();
+            if (permission === 'granted') {
+                state.lastNotifiedKey = null;
+                renderForecast({ notify: true });
+            }
+        });
     }
 
     function sendNotification(title, body, dedupeKey) {
@@ -785,10 +818,25 @@ function initApp() {
         if (dedupeKey && state.lastNotifiedKey === dedupeKey) return;
         state.lastNotifiedKey = dedupeKey ?? null;
 
-        if ('serviceWorker' in navigator) {
+        const options = { body, icon: 'icon-192.png', tag: 'rain-warning' };
+        const showDirectNotification = () => {
+            try {
+                const notification = new Notification(title, options);
+                notification.onclick = () => {
+                    window.focus();
+                    notification.close();
+                };
+            } catch (err) {
+                console.warn('Notification display failed:', err);
+            }
+        };
+
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             navigator.serviceWorker.ready
-                .then((reg) => reg.showNotification(title, { body, icon: 'icon-192.png' }))
-                .catch(() => {});
+                .then((reg) => reg.showNotification(title, options))
+                .catch(showDirectNotification);
+        } else {
+            showDirectNotification();
         }
     }
 
@@ -1237,7 +1285,7 @@ function initApp() {
                 el.value = state[stateKey];
                 writeStorage(storageKey, state[stateKey]);
                 syncQuickControls();
-                renderForecast();
+                renderForecast({ notify: stateKey === 'threshold' });
             });
         }
 
@@ -1351,6 +1399,64 @@ function initApp() {
         if (dom.gpsButton) dom.gpsButton.addEventListener('click', handleGpsClick);
         if (dom.refreshButton) dom.refreshButton.addEventListener('click', refreshWeatherData);
         if (dom.notificationBtn) dom.notificationBtn.addEventListener('click', requestNotificationPermission);
+
+        // Refresh stale data when waking from sleep, returning to the app window, or reconnecting.
+        function refreshIfStale() {
+            if (!state.lastFetchedAt) return;
+            if (Date.now() - state.lastFetchedAt.getTime() >= CONFIG.refreshIntervalMs) {
+                refreshWeatherData();
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshIfStale();
+        });
+        window.addEventListener('online', () => refreshWeatherData());
+
+        // Desktop keyboard shortcuts (ignored when typing in form fields or holding modifiers).
+        document.addEventListener('keydown', (event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            const target = event.target;
+            const isEditable = target && (
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT' ||
+                target.isContentEditable
+            );
+            if (isEditable) return;
+
+            switch (event.key.toLowerCase()) {
+                case '/':
+                    event.preventDefault();
+                    dom.locationInput?.focus();
+                    dom.locationInput?.select();
+                    break;
+                case 'r':
+                    event.preventDefault();
+                    refreshWeatherData();
+                    break;
+                case '1':
+                    setForecastHours(6);
+                    break;
+                case '2':
+                    setForecastHours(12);
+                    break;
+                case '3':
+                    setForecastHours(24);
+                    break;
+                case 'm':
+                    dom.chipModels?.click();
+                    break;
+                case 'i':
+                    dom.chipConfidence?.click();
+                    break;
+                case 'a':
+                    dom.chipAmount?.click();
+                    break;
+                default:
+                    break;
+            }
+        });
     }
 
     // --- Boot ---
@@ -1362,6 +1468,15 @@ function initApp() {
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        if (onInstallPrompt) {
+            onInstallPrompt(event);
+        } else {
+            earlyInstallPrompt = event;
+        }
+    });
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initApp);
     } else {

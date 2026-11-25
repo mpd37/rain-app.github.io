@@ -1,11 +1,14 @@
 {
+  "id": "./",
   "name": "Rain Warning",
   "short_name": "RainWarn",
-  "start_url": ".",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#09131d",
   "theme_color": "#09131d",
-  "description": "A simple app to provide rain warnings based on ensemble weather forecasts.",
+  "categories": ["weather", "utilities"],
+  "description": "Hourly ensemble rain probability and precipitation forecasts combining GFS, ECMWF, ICON, Google WeatherNext 3, and NWS.",
   "icons": [
     {
       "src": "icon-192.png",
